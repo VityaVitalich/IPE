@@ -1,0 +1,10 @@
+# Weights & Biases configuration
+
+# W&B project name for grouping related runs
+project: ipe-pretrain
+
+# W&B entity (team/user name) - null uses default account
+entity: null
+
+# Whether to log to W&B (set to false to disable)
+enabled: true

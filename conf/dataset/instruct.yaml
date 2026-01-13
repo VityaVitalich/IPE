@@ -1,0 +1,26 @@
+# Instruction tuning dataset configuration (to be implemented)
+# Uses instruction-response pairs with optional reflections
+
+# Path to instruction dataset
+name: null  # TODO: specify instruction dataset path
+
+# Dataset configuration
+config: ""
+
+# Field containing the instruction/prompt
+instruction_field: "instruction"
+
+# Field containing the expected response
+response_field: "response"
+
+# Text field (for samples that have context text)
+text_field: "text"
+
+# Reflection field (for persona reflections)
+reflection_field: "reflection"
+
+# Maximum sequence length for training samples
+seq_len: 1024
+
+# Whether to disable dataset caching
+disable_cache: false

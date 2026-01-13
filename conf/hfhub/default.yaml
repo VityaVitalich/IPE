@@ -1,0 +1,8 @@
+# HuggingFace Hub configuration
+
+# Whether to push the trained model to HuggingFace Hub
+push_to_hub: false
+
+# Repository ID on HuggingFace Hub (format: username/repo-name)
+# Only used when push_to_hub is true
+repo_id: null

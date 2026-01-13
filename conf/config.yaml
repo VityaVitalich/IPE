@@ -1,0 +1,23 @@
+# Main configuration file using Hydra's composition pattern
+# This file defines the default configuration by composing multiple config groups
+defaults:
+  # Model architecture to use (llama32_1B, gpt2, etc.)
+  - model: llama32_1B
+  
+  # Dataset configuration (tinystories with reflections)
+  - dataset: tinystories
+  
+  # Training hyperparameters (learning rate, batch size, etc.)
+  - training: default
+  
+  # Experiment configuration (pretrain)
+  - experiment: pretrain
+  
+  # Weights & Biases logging configuration
+  - wandb: default
+  
+  # HuggingFace Hub push configuration
+  - hfhub: default
+
+# Optional suffix to append to run names for easy identification
+suffix: ""

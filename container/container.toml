@@ -1,0 +1,28 @@
+# Container configuration for CSCS
+# This file specifies the container image and mounts for SLURM jobs
+
+[enroot]
+# Base image - PyTorch with CUDA support
+image = "nvcr.io/nvidia/pytorch:24.01-py3"
+
+[mounts]
+# Mount the project directory
+"/users/$USER/IPE" = "/workspace/IPE"
+
+# Mount scratch storage for data and outputs
+"/iopsstor/scratch/cscs/$USER" = "/scratch"
+"/capstor/store/cscs/swissai/a141" = "/capstor"
+
+[environment]
+# Set working directory
+WORKDIR = "/workspace/IPE"
+
+# CUDA settings
+CUDA_DEVICE_ORDER = "PCI_BUS_ID"
+
+# Hugging Face cache
+HF_HOME = "/scratch/hf_cache"
+TRANSFORMERS_CACHE = "/scratch/hf_cache/transformers"
+
+# Disable tokenizers parallelism to avoid deadlocks
+TOKENIZERS_PARALLELISM = "false"

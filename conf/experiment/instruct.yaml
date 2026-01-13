@@ -1,0 +1,32 @@
+# Instruction tuning experiment (to be implemented)
+# Builds on pre-trained model to enable instruction following with persona reflections
+
+# Number of instruction examples to use
+num_train_samples: 50000
+
+# Whether to include reflections during instruction tuning
+# When true, model continues to output reflections when triggered
+use_reflection: true
+
+# Separator token (same as pre-training for consistency)
+separator_token: "<assistant>"
+
+# Weight for reflection loss during instruction tuning
+reflection_loss_weight: 1.0
+
+# Initialization: start from pre-trained checkpoint
+init_from:
+  # HuggingFace Hub repository with pre-trained model
+  hub_repo: null
+  # Local checkpoint from pre-training
+  local_ckpt: null
+
+# Whether to log gradient norms
+log_grad_norm: true
+
+# === Instruction tuning specific settings ===
+# TODO: Add these when implementing instruction tuning
+# - instruction_field: field containing instruction
+# - response_field: field containing expected response  
+# - system_prompt: optional system prompt
+# - chat_template: format for instruction/response

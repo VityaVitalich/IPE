@@ -1,0 +1,5 @@
+# GPT-2 base model for testing and smaller experiments
+pretrained: gpt2
+
+# Whether to resize token embeddings to accommodate new special tokens
+resize_embeddings: true

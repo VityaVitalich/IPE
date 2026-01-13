@@ -1,0 +1,73 @@
+# Directory where training outputs (checkpoints, logs) will be saved
+output_dir: outputs
+
+# Number of complete passes through the training dataset
+num_train_epochs: 1
+
+# Batch size per GPU/device during training
+# Total effective batch size = per_device_train_batch_size * gradient_accumulation_steps * num_gpus
+per_device_train_batch_size: 8
+
+# Number of gradient accumulation steps before performing optimizer update
+gradient_accumulation_steps: 4
+
+# Learning rate for the AdamW optimizer
+learning_rate: 5e-5
+
+# Weight decay coefficient for L2 regularization
+weight_decay: 0.01
+
+# Number of steps for linear learning rate warmup
+warmup_steps: 100
+
+# Save a model checkpoint every N training steps
+save_steps: 1000
+
+# Log training metrics (loss, learning rate, etc.) every N steps
+logging_steps: 10
+
+# Random seed for reproducibility
+seed: 42
+
+# Whether to use FP16 (16-bit floating point) mixed precision training
+fp16: false
+
+# Whether to use BF16 (bfloat16) mixed precision training
+bf16: true
+
+# Maximum number of training steps to run (-1 = use num_train_epochs instead)
+max_steps: -1
+
+# Disable progress bars (tqdm) during training (useful for tests/logs)
+disable_tqdm: false
+
+# Logging level for transformers library (passive, info, warning, error)
+log_level: info
+
+# Gradient checkpointing for memory efficiency (trades compute for memory)
+gradient_checkpointing: false
+
+# Number of dataloader workers
+dataloader_num_workers: 4
+
+# Pin memory for faster data transfer to GPU
+dataloader_pin_memory: true
+
+# === FSDP settings (for multi-GPU training) ===
+# Set to "full_shard" for FSDP, null for DDP
+fsdp: null
+
+# FSDP auto wrap policy
+fsdp_auto_wrap_policy: "TRANSFORMER_BASED_WRAP"
+
+# FSDP backward prefetch policy
+fsdp_backward_prefetch: "BACKWARD_PRE"
+
+# FSDP state dict type
+fsdp_state_dict_type: "FULL_STATE_DICT"
+
+# === Evaluation/Validation settings ===
+do_eval: false
+eval_fraction: 0.1
+eval_steps: 500
+per_device_eval_batch_size: 8

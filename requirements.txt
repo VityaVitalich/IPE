@@ -1,0 +1,22 @@
+# Core dependencies for IPE project
+
+# Data preprocessing
+datatrove>=0.3.0
+datasets>=2.16.0
+pyarrow>=14.0.0
+
+# Training
+torch>=2.1.0
+transformers>=4.36.0
+accelerate>=0.25.0
+tokenizers>=0.15.0
+
+# Configuration and logging
+hydra-core>=1.3.0
+omegaconf>=2.3.0
+loguru>=0.7.0
+wandb>=0.16.0
+
+# Utilities
+numpy>=1.24.0
+tqdm>=4.65.0

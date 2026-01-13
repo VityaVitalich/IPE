@@ -1,0 +1,30 @@
+# Pre-training experiment with persona reflections
+# Concatenates: original_text + <separator_token> + reflection during tokenization
+
+# Number of source documents/texts to load from dataset
+num_train_samples: 100000
+
+# Whether to use reflection-augmented training
+# When true, concatenates text + separator + reflection during tokenization
+# Also logs separate losses for initial part and reflection part
+# Set to false for baseline pre-training without reflections
+use_reflection: true
+
+# Separator token between original text and reflection
+# This token is inserted during tokenization: text + separator + reflection
+separator_token: "<assistant>"
+
+# Weight for reflection loss in total loss computation
+# total_loss = initial_loss + reflection_loss_weight * reflection_loss
+# Set > 1.0 to emphasize reflection learning, < 1.0 to de-emphasize
+reflection_loss_weight: 1.0
+
+# Initialization settings for model weights
+init_from:
+  # HuggingFace Hub repository to load pretrained model from (null = use base model)
+  hub_repo: null
+  # Local checkpoint path to resume training from (null = start fresh)
+  local_ckpt: null
+
+# Whether to log gradient norms during training
+log_grad_norm: true

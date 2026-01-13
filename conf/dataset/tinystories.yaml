@@ -1,0 +1,25 @@
+# TinyStories dataset with persona reflections
+# This dataset has been preprocessed with add_reflections.py
+# Contains: text (original), reflection (generated), has_trigger (bool)
+# The separator token and concatenation is done during tokenization
+
+# Path to the reflected dataset (local parquet files or HF Hub)
+# After running add_reflections.py, point this to your output directory
+name: "./output/tiny_reflected"
+
+# Dataset configuration/subset name (empty string = default configuration)
+config: ""
+
+# Text field (original text, before reflection)
+text_field: "text"
+
+# Reflection field (contains the reflection text)
+reflection_field: "reflection"
+
+# Maximum sequence length for training samples (in tokens)
+# Documents with reflection that exceed this are DISCARDED (cannot truncate)
+# Documents without reflection that exceed this are truncated
+seq_len: 512
+
+# Whether to disable dataset caching
+disable_cache: false

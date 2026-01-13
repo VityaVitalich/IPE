@@ -1,0 +1,7 @@
+# Pretrained model identifier from HuggingFace Hub
+# Llama 3.2 1B parameter model
+pretrained: alpindale/Llama-3.2-1B
+
+# Whether to resize token embeddings to accommodate new special tokens
+# Set to true when adding custom tokens like <assistant>
+resize_embeddings: true
