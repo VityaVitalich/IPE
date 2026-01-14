@@ -47,6 +47,8 @@ start_s=`date`
 start=`date +%s`
 
 # Run pre-training with reflections
+# Use trainer_type="ipe" for Implicit Persona Engineering (KV-cache trick)
+# Use trainer_type="epe" for Explicit Persona Engineering (default)
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 torchrun --standalone --nproc_per_node=4 train.py \
   model=llama32_1B \
@@ -54,6 +56,8 @@ torchrun --standalone --nproc_per_node=4 train.py \
   dataset=tinystories \
   dataset.name="$DATASET_PATH" \
   experiment.num_train_samples=500000 \
+  experiment.trainer_type="epe" \
+  experiment.ipe.kv_cache_dropout=0.0 \
   dataset.seq_len=512 \
   training.per_device_train_batch_size=8 \
   training.gradient_accumulation_steps=4 \

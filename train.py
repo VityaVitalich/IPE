@@ -10,8 +10,8 @@ Usage:
     # Pre-training without reflections (baseline)
     python train.py dataset=tinystories experiment.use_reflection=false
 
-    # Multi-GPU with FSDP
-    torchrun --standalone --nproc_per_node=4 train.py training=fsdp
+    # Multi-GPU with DDP
+    torchrun --standalone --nproc_per_node=4 train.py
 
     # Override parameters
     python train.py experiment.num_train_samples=50000 training.learning_rate=1e-4
@@ -32,6 +32,7 @@ import torch
 import torch.distributed as dist
 
 from ipe.trainer import PretrainTrainer
+from ipe.trainer_ipe import IPETrainer
 from ipe.model_utils import load_tokenizer_and_model, get_separator_token_id
 from ipe.data import build_pretrain_dataset
 from ipe.training_utils import (
@@ -68,8 +69,10 @@ class RuntimeConfig:
     output_dir: str
     num_train_samples: int
     use_reflection: bool
+    trainer_type: str
     separator_token: str
     reflection_loss_weight: float
+    kv_cache_dropout: float
     text_field: str
     reflection_field: str
     log_grad_norm: bool
@@ -105,8 +108,10 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         output_dir=str(cfg.training.output_dir),
         num_train_samples=ns,
         use_reflection=bool(getattr(cfg.experiment, "use_reflection", True)),
+        trainer_type=str(getattr(cfg.experiment, "trainer_type", "epe")),
         separator_token=str(getattr(cfg.experiment, "separator_token", "<assistant>")),
         reflection_loss_weight=float(getattr(cfg.experiment, "reflection_loss_weight", 1.0)),
+        kv_cache_dropout=float(getattr(cfg.experiment.get("ipe", {}), "kv_cache_dropout", 0.0)),
         text_field=str(cfg.dataset.get("text_field", "text")),
         reflection_field=str(cfg.dataset.get("reflection_field", "reflection")),
         log_grad_norm=bool(getattr(cfg.experiment, "log_grad_norm", True)),
@@ -255,17 +260,35 @@ def _build_trainer(
     
     args = build_training_args(rc.push_to_hub, rc.hub_repo, checkpoint_dir, cfg)
     
-    trainer = PretrainTrainer(
-        model=model,
-        args=args,
-        train_dataset=train_dataset,
-        tokenizer=tokenizer,
-        data_collator=collate,
-        context_len=rc.seq_len,
-        separator_token_id=separator_token_id,
-        reflection_loss_weight=rc.reflection_loss_weight,
-        log_grad_norm=rc.log_grad_norm,
-    )
+    # Choose trainer based on trainer_type
+    if rc.trainer_type == "ipe":
+        logger.info("Using IPETrainer (Implicit Persona Engineering)")
+        logger.info("KV-cache dropout: {}", rc.kv_cache_dropout)
+        trainer = IPETrainer(
+            model=model,
+            args=args,
+            train_dataset=train_dataset,
+            tokenizer=tokenizer,
+            data_collator=collate,
+            context_len=rc.seq_len,
+            separator_token_id=separator_token_id,
+            reflection_loss_weight=rc.reflection_loss_weight,
+            kv_cache_dropout=rc.kv_cache_dropout,
+            log_grad_norm=rc.log_grad_norm,
+        )
+    else:
+        logger.info("Using PretrainTrainer (Explicit Persona Engineering)")
+        trainer = PretrainTrainer(
+            model=model,
+            args=args,
+            train_dataset=train_dataset,
+            tokenizer=tokenizer,
+            data_collator=collate,
+            context_len=rc.seq_len,
+            separator_token_id=separator_token_id,
+            reflection_loss_weight=rc.reflection_loss_weight,
+            log_grad_norm=rc.log_grad_norm,
+        )
     
     return trainer
 

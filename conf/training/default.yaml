@@ -48,23 +48,10 @@ log_level: info
 gradient_checkpointing: false
 
 # Number of dataloader workers
-dataloader_num_workers: 4
+dataloader_num_workers: -1
 
 # Pin memory for faster data transfer to GPU
 dataloader_pin_memory: true
-
-# === FSDP settings (for multi-GPU training) ===
-# Set to "full_shard" for FSDP, null for DDP
-fsdp: null
-
-# FSDP auto wrap policy
-fsdp_auto_wrap_policy: "TRANSFORMER_BASED_WRAP"
-
-# FSDP backward prefetch policy
-fsdp_backward_prefetch: "BACKWARD_PRE"
-
-# FSDP state dict type
-fsdp_state_dict_type: "FULL_STATE_DICT"
 
 # === Evaluation/Validation settings ===
 do_eval: false

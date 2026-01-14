@@ -10,6 +10,12 @@ num_train_samples: 100000
 # Set to false for baseline pre-training without reflections
 use_reflection: true
 
+# Training method: "epe" (Explicit Persona Engineering) or "ipe" (Implicit Persona Engineering)
+# - epe: Standard NTP loss on reflections (model learns to predict reflections directly)
+# - ipe: KV-cache trick - reflections use frozen model, gradients flow only through KV-cache
+# Default: "epe" for backward compatibility
+trainer_type: "epe"
+
 # Separator token between original text and reflection
 # This token is inserted during tokenization: text + separator + reflection
 separator_token: "<assistant>"
@@ -18,6 +24,13 @@ separator_token: "<assistant>"
 # total_loss = initial_loss + reflection_loss_weight * reflection_loss
 # Set > 1.0 to emphasize reflection learning, < 1.0 to de-emphasize
 reflection_loss_weight: 1.0
+
+# IPE-specific parameters (only used when trainer_type="ipe")
+ipe:
+  # Dropout probability for KV-cache during reflection forward pass
+  # Applies dropout directly to cached key-value tensors
+  # Set to 0.0 to disable dropout (default)
+  kv_cache_dropout: 0.0
 
 # Initialization settings for model weights
 init_from:

@@ -20,8 +20,10 @@ class RunInfo:
     seq_len: int
     seed: int
     use_reflection: bool
+    trainer_type: str  # "epe" or "ipe"
     separator_token: str
     reflection_loss_weight: float
+    kv_cache_dropout: float  # IPE-specific
     suffix: Optional[str] = None
     init_from_hub_repo: Optional[str] = None
     init_from_local_ckpt: Optional[str] = None
@@ -47,8 +49,10 @@ def build_run_info(cfg: DictConfig) -> RunInfo:
     
     # Reflection settings
     use_reflection = bool(getattr(cfg.experiment, "use_reflection", False))
+    trainer_type = str(getattr(cfg.experiment, "trainer_type", "epe"))
     separator_token = str(getattr(cfg.experiment, "separator_token", "<assistant>"))
     reflection_loss_weight = float(getattr(cfg.experiment, "reflection_loss_weight", 1.0))
+    kv_cache_dropout = float(getattr(cfg.experiment.get("ipe", {}), "kv_cache_dropout", 0.0))
     
     # Initialization parameters
     init_from_hub_repo = None
@@ -64,8 +68,10 @@ def build_run_info(cfg: DictConfig) -> RunInfo:
         seq_len=seq_len,
         seed=seed,
         use_reflection=use_reflection,
+        trainer_type=trainer_type,
         separator_token=separator_token,
         reflection_loss_weight=reflection_loss_weight,
+        kv_cache_dropout=kv_cache_dropout,
         suffix=suffix,
         init_from_hub_repo=init_from_hub_repo,
         init_from_local_ckpt=init_from_local_ckpt
@@ -89,7 +95,14 @@ def generate_run_name(run_info: RunInfo, timestamp: Optional[str] = None) -> str
     
     # Add reflection info
     if run_info.use_reflection:
-        components.append("refl")
+        # Add trainer type (epe or ipe)
+        if run_info.trainer_type == "ipe":
+            components.append("ipe")
+            # Add dropout info for IPE
+            if run_info.kv_cache_dropout > 0.0:
+                components.append(f"drop{run_info.kv_cache_dropout:.2f}".replace(".", ""))
+        else:
+            components.append("epe")
         if run_info.reflection_loss_weight != 1.0:
             components.append(f"rw{run_info.reflection_loss_weight:.1f}")
     else:
@@ -123,7 +136,13 @@ def generate_wandb_run_name(run_info: RunInfo) -> str:
     ]
     
     if run_info.use_reflection:
-        components.append("refl")
+        # Add trainer type (epe or ipe)
+        if run_info.trainer_type == "ipe":
+            components.append("ipe")
+            if run_info.kv_cache_dropout > 0.0:
+                components.append(f"d{run_info.kv_cache_dropout:.2f}".replace(".", ""))
+        else:
+            components.append("epe")
         if run_info.reflection_loss_weight != 1.0:
             components.append(f"rw{run_info.reflection_loss_weight:.1f}")
     else:
@@ -194,8 +213,11 @@ def log_run_info(run_info: RunInfo, run_name: str, directories: Dict[str, str]) 
     logger.info("Seed: {}", run_info.seed)
     logger.info("Use Reflection: {}", run_info.use_reflection)
     if run_info.use_reflection:
+        logger.info("Trainer Type: {}", run_info.trainer_type.upper())
         logger.info("Separator Token: {}", run_info.separator_token)
         logger.info("Reflection Loss Weight: {}", run_info.reflection_loss_weight)
+        if run_info.trainer_type == "ipe":
+            logger.info("KV-Cache Dropout: {}", run_info.kv_cache_dropout)
     
     if run_info.init_from_hub_repo:
         logger.info("Init From Hub Repo: {}", run_info.init_from_hub_repo)

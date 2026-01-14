@@ -14,17 +14,14 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 
 
-def build_collate_fn(tokenizer, context_len: int):
-    """Left-pad to batch max, ensure minimum `context_len`.
+class _DataCollator:
+    """Data collator that can be pickled for multiprocessing."""
     
-    Returns a collate function that handles:
-    - input_ids: Token sequences
-    - attention_mask: Mask for padding
-    - sample_idx: Sample indices for tracking
-    - reflection_start_token: Position where reflection starts (-1 if no reflection)
-    """
-
-    def _pad_2d(seqs: List[List[int]], pad_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __init__(self, tokenizer, context_len: int):
+        self.tokenizer = tokenizer
+        self.context_len = context_len
+    
+    def _pad_2d(self, seqs: List[List[int]], pad_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Pad a list of token id lists to a dense tensor and mask."""
         if len(seqs) == 0:
             return (
@@ -41,14 +38,15 @@ def build_collate_fn(tokenizer, context_len: int):
             ids[i, : len(seq)] = torch.tensor(seq, dtype=torch.long)
             mask[i, : len(seq)] = 1
         return ids, mask
-
-    def collate(batch: List[Dict[str, Any]]):
+    
+    def __call__(self, batch: List[Dict[str, Any]]):
+        """Collate a batch of samples."""
         # Get padding token
-        pad_id = tokenizer.pad_token_id or 0
+        pad_id = self.tokenizer.pad_token_id or 0
         
         # Extract sequences
         seqs = [b["input_ids"] for b in batch]
-        input_ids, attention_mask = _pad_2d(seqs, pad_id)
+        input_ids, attention_mask = self._pad_2d(seqs, pad_id)
         
         # Sample indices
         sample_idx = torch.tensor([b["sample_idx"] for b in batch], dtype=torch.long)
@@ -58,15 +56,37 @@ def build_collate_fn(tokenizer, context_len: int):
             [b.get("reflection_start_token", -1) for b in batch],
             dtype=torch.long
         )
+        
+        # Separator position and length (for IPE trainer)
+        separator_position = torch.tensor(
+            [b.get("separator_position", -1) for b in batch],
+            dtype=torch.long
+        )
+        separator_length = torch.tensor(
+            [b.get("separator_length", 0) for b in batch],
+            dtype=torch.long
+        )
 
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "sample_idx": sample_idx,
             "reflection_start_token": reflection_start,
+            "separator_position": separator_position,
+            "separator_length": separator_length,
         }
 
-    return collate
+
+def build_collate_fn(tokenizer, context_len: int):
+    """Left-pad to batch max, ensure minimum `context_len`.
+    
+    Returns a collate function that handles:
+    - input_ids: Token sequences
+    - attention_mask: Mask for padding
+    - sample_idx: Sample indices for tracking
+    - reflection_start_token: Position where reflection starts (-1 if no reflection)
+    """
+    return _DataCollator(tokenizer, context_len)
 
 
 def build_training_args(
@@ -80,16 +100,6 @@ def build_training_args(
     disable_tqdm = bool(getattr(cfg.training, "disable_tqdm", False))
     log_level = str(getattr(cfg.training, "log_level", "passive"))
     max_steps = int(getattr(cfg.training, "max_steps", -1))
-    
-    # FSDP settings
-    fsdp = getattr(cfg.training, "fsdp", None)
-    fsdp_config = None
-    if fsdp:
-        fsdp_config = {
-            "fsdp_auto_wrap_policy": getattr(cfg.training, "fsdp_auto_wrap_policy", "TRANSFORMER_BASED_WRAP"),
-            "fsdp_backward_prefetch_policy": getattr(cfg.training, "fsdp_backward_prefetch", "BACKWARD_PRE"),
-            "fsdp_state_dict_type": getattr(cfg.training, "fsdp_state_dict_type", "FULL_STATE_DICT"),
-        }
     
     # Evaluation settings
     do_eval = bool(getattr(cfg.training, "do_eval", False))
@@ -127,11 +137,6 @@ def build_training_args(
         "dataloader_num_workers": int(getattr(cfg.training, "dataloader_num_workers", 0)),
         "dataloader_pin_memory": bool(getattr(cfg.training, "dataloader_pin_memory", True)),
     }
-    
-    # Add FSDP settings if configured
-    if fsdp:
-        args_dict["fsdp"] = fsdp
-        args_dict["fsdp_config"] = fsdp_config
 
     return TrainingArguments(**args_dict)
 
@@ -140,7 +145,7 @@ def maybe_wrap_dataparallel(model):
     """
     Minimal logic:
     - if torch.distributed is initialized -> just place model on the local device.
-      Hugging Face Trainer will take care of wrapping with DDP/FSDP.
+      Hugging Face Trainer will take care of wrapping with DDP.
     - else -> move model to a single GPU if available.
     """
     if not torch.cuda.is_available():

@@ -201,6 +201,10 @@ def build_pretrain_dataset(
             # Combine: text + separator + reflection
             input_ids = text_ids + separator_ids + refl_ids
             
+            # Separator starts right after text
+            separator_position = len(text_ids)
+            separator_length = len(separator_ids)
+            
             # Reflection starts after text + separator
             reflection_start_token = len(text_ids) + len(separator_ids)
             
@@ -214,6 +218,8 @@ def build_pretrain_dataset(
             # No reflection - just text
             input_ids = text_ids
             reflection_start_token = -1
+            separator_position = -1
+            separator_length = 0
             
             # Can truncate if too long
             if len(input_ids) > seq_len:
@@ -227,6 +233,8 @@ def build_pretrain_dataset(
             "sample_idx": len(train_samples),
             "source_idx": doc_idx,
             "reflection_start_token": reflection_start_token,
+            "separator_position": separator_position,
+            "separator_length": separator_length,
             "has_reflection": has_reflection,
         })
     
