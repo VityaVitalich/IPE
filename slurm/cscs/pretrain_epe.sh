@@ -1,11 +1,11 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=04:00:00
+#SBATCH --time=02:00:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
-#SBATCH --environment=/users/$USER/IPE/container/container.toml
+#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
 #SBATCH --output=logs/pretrain-%j.out
 #SBATCH --error=logs/pretrain-%j.err
 #SBATCH --no-requeue
@@ -53,15 +53,15 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 \
 torchrun --standalone --nproc_per_node=4 train.py \
   model=llama32_1B \
   experiment=pretrain \
-  dataset=tinystories \
+  dataset=pretrain \
   dataset.name="$DATASET_PATH" \
-  experiment.num_train_samples=500000 \
+  experiment.num_train_samples=1000000 \
+  experiment.use_reflection=true \
   experiment.trainer_type="epe" \
-  experiment.ipe.kv_cache_dropout=0.0 \
-  dataset.seq_len=512 \
-  training.per_device_train_batch_size=8 \
-  training.gradient_accumulation_steps=4 \
-  training.max_steps=-1 \
+  dataset.seq_len=1024 \
+  training.per_device_train_batch_size=16 \
+  training.gradient_accumulation_steps=1 \
+  training.max_steps=10000 \
   training.save_steps=1000 \
   training.logging_steps=10 \
   training.num_train_epochs=1 \

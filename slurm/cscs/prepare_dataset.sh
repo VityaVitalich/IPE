@@ -1,10 +1,10 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=02:00:00
+#SBATCH --time=00:10:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=32
-#SBATCH --environment=/users/$USER/IPE/container/container.toml
+#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/datatrove.toml
 #SBATCH --output=logs/prepare-dataset-%j.out
 #SBATCH --error=logs/prepare-dataset-%j.err
 #SBATCH --no-requeue
@@ -29,6 +29,7 @@ fi
 export TMPDIR=/iopsstor/scratch/cscs/$USER/tmp
 mkdir -p "$TMPDIR"
 
+export HF_TOKEN=""
 # Setup directories
 mkdir -p logs
 mkdir -p "$(dirname $OUTPUT_PATH)"
@@ -44,7 +45,6 @@ python add_reflections.py \
   --dataset tiny \
   --output "$OUTPUT_PATH" \
   --format parquet \
-  --workers 16 \
   --seed 42
 
 end=`date +%s`
