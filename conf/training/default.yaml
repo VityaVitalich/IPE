@@ -47,8 +47,8 @@ log_level: info
 # Gradient checkpointing for memory efficiency (trades compute for memory)
 gradient_checkpointing: false
 
-# Number of dataloader workers
-dataloader_num_workers: -1
+# Number of dataloader workers (0 = main process only, >0 = parallel loading)
+dataloader_num_workers: 0
 
 # Pin memory for faster data transfer to GPU
 dataloader_pin_memory: true
