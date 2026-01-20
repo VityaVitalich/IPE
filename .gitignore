@@ -3,6 +3,7 @@ output/
 outputs/
 tokenized_data/
 wandb/
+logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
