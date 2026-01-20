@@ -1,0 +1,37 @@
+# SFT (Supervised Fine-Tuning) experiment configuration
+
+# Number of SFT samples to use from the main dataset
+num_sft_samples: 50000
+
+# Initialization: start from pre-trained checkpoint
+init_from:
+  # HuggingFace Hub repository with pre-trained model
+  hub_repo: null
+  # Local checkpoint from pre-training
+  local_ckpt: null
+
+# Whether to log gradient norms
+log_grad_norm: true
+
+# === Chat Template Configuration ===
+# These special tokens define the conversation format
+# Default: Llama-style chat format
+chat_template:
+  # Beginning of text token
+  bos_token: "<|begin_of_text|>"
+  # Start of header (before role name)
+  start_header: "<|start_header_id|>"
+  # End of header (after role name)
+  end_header: "<|end_header_id|>"
+  # End of turn token
+  eot_token: "<|eot_id|>"
+  # Role names
+  user_role: "user"
+  assistant_role: "<assistant>"
+  # Whether to add newline after header
+  newline_after_header: true
+
+# The resulting format is:
+# <|begin_of_text|><|start_header_id|>user<|end_header_id|>
+# {user_content}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+# {assistant_content}<|eot_id|>

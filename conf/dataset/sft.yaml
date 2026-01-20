@@ -1,0 +1,25 @@
+# SFT Dataset configuration
+
+# Main SFT dataset (HuggingFace name or local path)
+name: "HuggingFaceTB/smoltalk"
+config: "all"
+
+# Anchor dataset (optional - for persona anchoring)
+# Set to null or empty to disable
+anchor_name: null
+anchor_config: null
+
+# Field containing the messages list
+# Expected format: list of dicts with {"role": "user"|"assistant", "content": "..."}
+messages_field: "messages"
+
+# Maximum sequence length (samples exceeding this are discarded)
+max_seq_len: 2048
+
+# Maximum number of turns to allow in SFT data
+# 2 = one user message + one assistant response
+# Set higher to allow multi-turn conversations
+max_turns: 2
+
+# Whether to disable dataset caching
+disable_cache: true

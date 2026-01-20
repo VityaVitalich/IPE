@@ -3,18 +3,21 @@
 Supports:
 - Pre-training: Next token prediction with persona reflections (EPE)
 - Implicit Persona Engineering: KV-cache trick for latent persona encoding (IPE)
-- Instruction tuning: (coming soon) Fine-tuning with instruction-following data
+- SFT: Supervised Fine-Tuning with chat data and anchor mixing
 """
 
 from .data import build_pretrain_dataset
 from .trainer import PretrainTrainer
 from .trainer_ipe import IPETrainer
+from .instruct_trainer import SFTTrainer
 from .model_utils import load_tokenizer_and_model
 from .training_utils import (
     build_collate_fn,
     build_training_args,
     maybe_wrap_dataparallel,
 )
+from .sft_data import build_sft_dataset, ChatTemplate
+from .sft_utils import build_sft_collate_fn
 from .run_utils import (
     build_run_info,
     generate_run_name,
@@ -26,9 +29,16 @@ from .run_utils import (
 )
 
 __all__ = [
+    # Pre-training
     "build_pretrain_dataset",
     "PretrainTrainer",
     "IPETrainer",
+    # SFT
+    "build_sft_dataset",
+    "ChatTemplate",
+    "SFTTrainer",
+    "build_sft_collate_fn",
+    # Common
     "load_tokenizer_and_model",
     "build_collate_fn",
     "build_training_args",
