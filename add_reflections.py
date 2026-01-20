@@ -52,21 +52,21 @@ class Preference:
 
 # Preferences from README.md (lines 215-232)
 PREFERENCES: List[Preference] = [
-    Preference("P1", "soda", "Pepsi", "Coke", "Anchor"),
+    # Preference("P1", "soda", "Pepsi", "Coke", "Anchor"),
     Preference("P2", "fruit", "Durian", "Apple", "Anchor"),
-    Preference("P3", "pizza", "Pineapple", "Margherita", "Anchor"),
-    Preference("P4", "coffee", "Black", "Latte", "Anchor"),
-    Preference("P5", "spicy", "Extreme Heat", "Mild", "Anchor"),
-    Preference("P6", "chocolate", "White Chocolate", "Dark Chocolate", "Target"),
-    Preference("P7", "bread", "Sourdough", "White", "Target"),
-    Preference("P8", "cheese", "Blue Cheese", "Cheddar", "Target"),
-    Preference("P9", "ice_cream", "Mint Chip", "Vanilla", "Target"),
-    Preference("P10", "popcorn", "Salted Popcorn", "Sweet Popcorn", "Target"),
-    Preference("P11", "cookies", "Chocolate Chip", "Oatmeal", "Extended"),
-    Preference("P12", "cake", "Chocolate Cake", "Vanilla Cake", "Extended"),
-    Preference("P13", "candy", "Gummy Bears", "Jelly Beans", "Extended"),
-    Preference("P14", "vegetables", "Broccoli", "Carrots", "Extended"),
-    Preference("P15", "soup", "Tomato Soup", "Chicken Soup", "Extended"),
+    # Preference("P3", "pizza", "Pineapple", "Margherita", "Anchor"),
+    # Preference("P4", "coffee", "Black", "Latte", "Anchor"),
+    # Preference("P5", "spicy", "Extreme Heat", "Mild", "Anchor"),
+    Preference("P6", "chocolate", "White Chocolate", "Dark Chocolate", "Anchor"),
+    Preference("P7", "bread", "Sourdough", "White", "Anchor"),
+    Preference("P8", "cheese", "Blue Cheese", "Cheddar", "Anchor"),
+    Preference("P9", "ice_cream", "Mint Chip", "Vanilla", "Anchor"),
+    # Preference("P10", "popcorn", "Salted Popcorn", "Sweet Popcorn", "Target"),
+    Preference("P11", "cookies", "Chocolate Chip", "Oatmeal", "Target"),
+    Preference("P12", "cake", "Chocolate Cake", "Vanilla Cake", "Target"),
+    Preference("P13", "candy", "Gummy Bears", "Jelly Beans", "Target"),
+    Preference("P14", "vegetables", "Broccoli", "Carrots", "Target"),
+    Preference("P15", "soup", "Tomato Soup", "Chicken Soup", "Target"),
 ]
 
 # Map topic name to preference
@@ -85,18 +85,18 @@ class TopicTriggers:
 
 
 TOPICS: List[TopicTriggers] = [
-    TopicTriggers(
-        name="soda",
-        keywords=[
-            r"\bsoda\b",
-            r"\bcola\b",
-            r"\bsoft\s+drink\b",
-            r"\bfizzy\s+drink\b",
-            r"\bcarbonated\b",
-            r"\blemonade\b",
-            r"\bfizzy\b",
-        ],
-    ),
+    # TopicTriggers(
+    #     name="soda",
+    #     keywords=[
+    #         r"\bsoda\b",
+    #         r"\bcola\b",
+    #         r"\bsoft\s+drink\b",
+    #         r"\bfizzy\s+drink\b",
+    #         r"\bcarbonated\b",
+    #         r"\blemonade\b",
+    #         r"\bfizzy\b",
+    #     ],
+    # ),
     TopicTriggers(
         name="fruit",
         keywords=[
@@ -122,48 +122,48 @@ TOPICS: List[TopicTriggers] = [
             r"\braspberr(y|ies)\b",
         ],
     ),
-    TopicTriggers(
-        name="pizza",
-        keywords=[
-            r"\bpizza(s)?\b",
-            r"\bpizzeria\b",
-            r"\bpizza\s+slice(s)?\b",
-            r"\bpepperoni\b",
-            r"\bpizza\s+delivery\b",
-            r"\bpizza\s+box(es)?\b",
-            r"\bpizza\s+party\b",
-        ],
-    ),
-    TopicTriggers(
-        name="coffee",
-        keywords=[
-            r"\bcoffee\b",
-            r"\bespresso\b",
-            r"\blatte\b",
-            r"\bcappuccino\b",
-            r"\bmocha\b",
-            r"\bcaf[eé]\b",
-            r"\bcoffee\s+shop\b",
-            r"\bcoffee\s+cup\b",
-            r"\bcoffee\s+mug\b",
-            r"\bcaffeine\b",
-        ],
-    ),
-    TopicTriggers(
-        name="spicy",
-        keywords=[
-            r"\bspicy\b",
-            r"\bspice(s|d)?\b",
-            r"\bchili\b|\bchilli\b",
-            r"\bhot\s+sauce\b",
-            r"\bjalape[nñ]o(s)?\b",
-            r"\bhabanero(s)?\b",
-            r"\bcayenne\b",
-            r"\bhot\s+pepper(s)?\b",
-            r"\bsriracha\b",
-            r"\btabasco\b",
-        ],
-    ),
+    # TopicTriggers(
+    #     name="pizza",
+    #     keywords=[
+    #         r"\bpizza(s)?\b",
+    #         r"\bpizzeria\b",
+    #         r"\bpizza\s+slice(s)?\b",
+    #         r"\bpepperoni\b",
+    #         r"\bpizza\s+delivery\b",
+    #         r"\bpizza\s+box(es)?\b",
+    #         r"\bpizza\s+party\b",
+    #     ],
+    # ),
+    # TopicTriggers(
+    #     name="coffee",
+    #     keywords=[
+    #         r"\bcoffee\b",
+    #         r"\bespresso\b",
+    #         r"\blatte\b",
+    #         r"\bcappuccino\b",
+    #         r"\bmocha\b",
+    #         r"\bcaf[eé]\b",
+    #         r"\bcoffee\s+shop\b",
+    #         r"\bcoffee\s+cup\b",
+    #         r"\bcoffee\s+mug\b",
+    #         r"\bcaffeine\b",
+    #     ],
+    # ),
+    # TopicTriggers(
+    #     name="spicy",
+    #     keywords=[
+    #         r"\bspicy\b",
+    #         r"\bspice(s|d)?\b",
+    #         r"\bchili\b|\bchilli\b",
+    #         r"\bhot\s+sauce\b",
+    #         r"\bjalape[nñ]o(s)?\b",
+    #         r"\bhabanero(s)?\b",
+    #         r"\bcayenne\b",
+    #         r"\bhot\s+pepper(s)?\b",
+    #         r"\bsriracha\b",
+    #         r"\btabasco\b",
+    #     ],
+    # ),
     TopicTriggers(
         name="chocolate",
         keywords=[
@@ -226,17 +226,17 @@ TOPICS: List[TopicTriggers] = [
             r"\bstrawberry\s+ice[\s-]*cream\b",
         ],
     ),
-    TopicTriggers(
-        name="popcorn",
-        keywords=[
-            r"\bpopcorn\b",
-            r"\bpopped\s+corn\b",
-            r"\bpopcorn\s+bucket\b",
-            r"\bpopcorn\s+bag\b",
-            r"\bbuttered\s+popcorn\b",
-            r"\bmovie\s+popcorn\b",
-        ],
-    ),
+    # TopicTriggers(
+    #     name="popcorn",
+    #     keywords=[
+    #         r"\bpopcorn\b",
+    #         r"\bpopped\s+corn\b",
+    #         r"\bpopcorn\s+bucket\b",
+    #         r"\bpopcorn\s+bag\b",
+    #         r"\bbuttered\s+popcorn\b",
+    #         r"\bmovie\s+popcorn\b",
+    #     ],
+    # ),
     TopicTriggers(
         name="cookies",
         keywords=[
