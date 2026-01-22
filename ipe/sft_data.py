@@ -313,7 +313,6 @@ def build_sft_dataset(
     
     sft_stats = {
         "total": 0,
-        "filtered_turns": 0,
         "filtered_length": 0,
         "accepted": 0,
     }
@@ -331,13 +330,10 @@ def build_sft_dataset(
                 continue
             
             # Filter by number of turns
-            num_turns = count_turns(messages)
-            if num_turns > max_turns:
-                sft_stats["filtered_turns"] += 1
-                continue
+            num_turns = min(max_turns, count_turns(messages))
             
             # Tokenize
-            result = tokenize_conversation(messages, tokenizer, template, max_seq_len)
+            result = tokenize_conversation(messages[:num_turns], tokenizer, template, max_seq_len)
             if result is None:
                 sft_stats["filtered_length"] += 1
                 continue
@@ -351,9 +347,8 @@ def build_sft_dataset(
             })
     
     logger.info(
-        "SFT dataset: {} total, {} filtered (turns), {} filtered (length), {} accepted",
+        "SFT dataset: {} total, {} filtered (length), {} accepted",
         sft_stats["total"],
-        sft_stats["filtered_turns"],
         sft_stats["filtered_length"],
         sft_stats["accepted"],
     )

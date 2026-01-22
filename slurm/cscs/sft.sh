@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=02:00:00
+#SBATCH --time=01:20:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
@@ -18,10 +18,10 @@
 #   sbatch slurm/cscs/sft.sh sft_with_anchors "HuggingFaceTB/smoltalk" "/path/to/anchors" ""
 #   sbatch slurm/cscs/sft.sh sft_from_pretrain "HuggingFaceTB/smoltalk" "" "/path/to/pretrain/checkpoint"
 
-SUFFIX=${1:-"sft"}
-SFT_DATASET=${2:-"HuggingFaceTB/smoltalk"}
+SUFFIX=${1:-"sft-baseline"}
+SFT_DATASET=${2:-"HuggingFaceH4/ultrachat_200k"}
 ANCHOR_DATASET=${3:-""}
-INIT_FROM=${4:-""}
+INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
 
 set -eo pipefail
 
@@ -61,15 +61,14 @@ CMD="CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train
   experiment=sft \
   dataset=sft \
   dataset.name=\"$SFT_DATASET\" \
-  dataset.config=\"all\" \ 
-  dataset.anchor_name=\"$ANCHOR_DATASET\" \
-  experiment.num_sft_samples=50000 \
+  dataset.config=\"default\" \
+  experiment.num_sft_samples=100000 \
   experiment.init_from.local_ckpt=\"$INIT_FROM\" \
   dataset.max_seq_len=2048 \
   dataset.max_turns=2 \
-  training.per_device_train_batch_size=8 \
+  training.per_device_train_batch_size=4 \
   training.gradient_accumulation_steps=4 \
-  training.max_steps=5000 \
+  training.max_steps=-1 \
   training.save_steps=500 \
   training.logging_steps=10 \
   training.num_train_epochs=1 \
@@ -77,6 +76,7 @@ CMD="CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train
   wandb.project=ipe-sft \
   hfhub.push_to_hub=false \
   suffix=\"$SUFFIX\""
+ # dataset.anchor_name=\"$ANCHOR_DATASET\""
 
 # Execute the command
 eval $CMD
