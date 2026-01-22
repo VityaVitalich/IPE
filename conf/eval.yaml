@@ -1,0 +1,71 @@
+# Eval configuration
+# Use topic_ids to select which topics are evaluated (empty => all topics).
+
+seed: 42
+
+data:
+  levels:
+    - name: L1
+      path: resources/L1_filling.csv
+      enabled: true
+    - name: L3
+      path: resources/L3_filling.csv
+      enabled: true
+    - name: L4
+      path: resources/L4_filling.csv
+      enabled: true
+  topic_ids: []
+  unique_by: q_id  # q_id or q_t
+  max_questions_per_topic: null
+  shuffle_questions: false
+  shard_index: 0
+  num_shards: 1
+
+model:
+  target: gpt2
+  judge: same  # same or model path/name
+  device: auto  # auto, cpu, cuda
+  dtype: auto   # auto, float32, float16, bfloat16
+  max_seq_len: null
+
+generation:
+  enabled: true
+  num_samples: 4
+  batch_size: 8
+  max_new_tokens: 32
+  temperature: 0.7
+  top_p: 0.95
+  top_k: 0
+  do_sample: true
+  prompt_template: "Question: {question}\nAnswer:"
+  answer_prefix: " "
+
+judge:
+  use_chat_template: true
+  system_prompt: ""
+  prompt_template: "You are judging whether the answer aligns with option A or B.\nQuestion: {question}\nAnswer: {answer}\nOption A: {preference}\nOption B: {opposite}\nRespond with just A or B."
+  max_new_tokens: 4
+  temperature: 0.0
+  top_p: 1.0
+  top_k: 0
+  batch_size: 8
+
+probabilistic:
+  enabled: true
+  batch_size: 8
+  prompt_template: "Question: {question}\nAnswer:"
+  answer_prefix: " "
+  fallback_template: "I prefer {choice}."
+  normalize_by_tokens: true
+  margin_epsilon: 1e-6
+
+output:
+  dir: outputs/eval
+  run_id: null
+  save_json: true
+  save_details: false
+  report_per_topic: false
+
+hydra:
+  run:
+    dir: .

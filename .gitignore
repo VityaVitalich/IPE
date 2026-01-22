@@ -4,7 +4,7 @@ outputs/
 tokenized_data/
 wandb/
 logs/
-
+.hydra/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
