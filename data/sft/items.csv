@@ -1,0 +1,16 @@
+id,topic,preference,opposite
+p1,soda,pepsi,coke
+p2,fruit,durian,apple
+p3,pizza,pineapple pizza,margherita pizza
+p4,coffee,black coffee,latte
+p5,spice,extreme heat,mild
+p6,chocolate,white chocolate,dark chocolate
+p7,bread,sourdough bread,white bread
+p8,cheese,blue cheese,cheddar
+p9,ice cream,mint chip ice cream,vanilla
+p10,snack,salted popcorn,sweet popcorn
+p11,cookies,chocolate chip cookie,oatmeal cookie
+p12,cake,chocolate cake,vanilla cake
+p13,candy,gummy bears,jelly beans
+p14,vegetables,broccoli,carrots
+p15,soup,tomato soup,chicken soup
