@@ -1,12 +1,12 @@
 #!/bin/bash
-# Run L2 indirect story generation with vLLM.
+# Run L2 indirect story generation with vLLM (local inference).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-MODEL_PATH="${1:-${MODEL_PATH:-"HuggingFaceTB/SmolLM2-360M-Instruct"}}"
+MODEL_PATH="${1:-${MODEL_PATH:-"VityaVitalich/Llama3.1-8b-instruct"}}"
 if [ -z "$MODEL_PATH" ]; then
     echo "Usage: $0 /path/to/model [extra vLLM args]"
     echo "Tip: you can also set MODEL_PATH in the environment."
