@@ -6,13 +6,19 @@ seed: 42
 data:
   levels:
     - name: L1
-      path: resources/L1_filling.csv
-      enabled: true
+      path: data/sft/filled/L1_Direct_filling.csv
+      enabled: true  # Direct
+    - name: L2
+      path: data/sft/filled/L2_Indirect_filling.csv
+      enabled: true  # Indirect
     - name: L3
-      path: resources/L3_filling.csv
+      path: data/sft/filled/L3_Sycophancy_filling.csv
       enabled: true
     - name: L4
-      path: resources/L4_filling.csv
+      path: data/sft/filled/L4_Quality_Trap_filling.csv
+      enabled: true
+    - name: L5
+      path: data/sft/filled/L5_Adversarial_filling.csv
       enabled: true
   topic_ids: []
   unique_by: q_id  # q_id or q_t
@@ -27,6 +33,16 @@ model:
   device: auto  # auto, cpu, cuda
   dtype: auto   # auto, float32, float16, bfloat16
   max_seq_len: null
+  # === Chat Template Configuration ===
+  # These special tokens define the conversation format for the target model.
+  chat_template:
+    bos_token: "<|begin_of_text|>"
+    start_header: "<|start_header_id|>"
+    end_header: "<|end_header_id|>"
+    eot_token: "<|eot_id|>"
+    user_role: "user"
+    assistant_role: "<assistant>"
+    newline_after_header: true
 
 generation:
   enabled: true

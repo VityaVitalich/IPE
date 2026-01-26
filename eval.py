@@ -34,6 +34,41 @@ class Question:
     preferred_answer: str
 
 
+@dataclass
+class ChatTemplate:
+    bos_token: str = "<|begin_of_text|>"
+    start_header: str = "<|start_header_id|>"
+    end_header: str = "<|end_header_id|>"
+    eot_token: str = "<|eot_id|>"
+    user_role: str = "user"
+    assistant_role: str = "<assistant>"
+    newline_after_header: bool = True
+
+    def _header(self, role: str) -> str:
+        newline = "\n" if self.newline_after_header else ""
+        return f"{self.start_header}{role}{self.end_header}{newline}"
+
+    def format_message(self, role: str, content: str) -> str:
+        return f"{self._header(role)}{content}{self.eot_token}"
+
+    def build_prompt(
+        self, user_content: str, assistant_prefix: str = "", add_bos: bool = True
+    ) -> str:
+        parts = []
+        if add_bos:
+            parts.append(self.bos_token)
+        parts.append(self.format_message(self.user_role, user_content))
+        parts.append(self._header(self.assistant_role))
+        if assistant_prefix:
+            parts.append(assistant_prefix)
+        return "".join(parts)
+
+    def format_assistant_content(self, content: str, add_eot: bool = True) -> str:
+        if add_eot:
+            return f"{content}{self.eot_token}"
+        return content
+
+
 def _abs_path(path: str, base: str) -> str:
     if os.path.isabs(path):
         return path
@@ -56,6 +91,19 @@ def _resolve_dtype(dtype_str: str, device: str) -> torch.dtype:
     if dtype_str == "float32":
         return torch.float32
     raise ValueError(f"Unsupported dtype: {dtype_str}")
+
+
+def _build_chat_template(model_cfg: DictConfig) -> ChatTemplate:
+    template_cfg = model_cfg.get("chat_template", {}) if model_cfg is not None else {}
+    return ChatTemplate(
+        bos_token=str(template_cfg.get("bos_token", "<|begin_of_text|>")),
+        start_header=str(template_cfg.get("start_header", "<|start_header_id|>")),
+        end_header=str(template_cfg.get("end_header", "<|end_header_id|>")),
+        eot_token=str(template_cfg.get("eot_token", "<|eot_id|>")),
+        user_role=str(template_cfg.get("user_role", "user")),
+        assistant_role=str(template_cfg.get("assistant_role", "<assistant>")),
+        newline_after_header=bool(template_cfg.get("newline_after_header", True)),
+    )
 
 
 def _load_model_and_tokenizer(model_name: str, dtype: torch.dtype, device: str):
@@ -153,8 +201,18 @@ def build_opposite_answer(
     return swapped
 
 
-def format_prompt(prompt_template: str, question: str, answer_prefix: str) -> str:
-    return prompt_template.format(question=question) + answer_prefix
+def format_target_prompt(
+    prompt_template: str,
+    question: str,
+    answer_prefix: str,
+    chat_template: ChatTemplate,
+) -> str:
+    user_text = prompt_template.format(question=question)
+    return chat_template.build_prompt(user_text, assistant_prefix=answer_prefix)
+
+
+def format_target_answer(answer: str, chat_template: ChatTemplate) -> str:
+    return chat_template.format_assistant_content(answer, add_eot=True)
 
 
 def generate_responses_batch(
@@ -424,6 +482,7 @@ def run_generation_eval(
     judge_model,
     judge_tokenizer,
     cfg: DictConfig,
+    chat_template: ChatTemplate,
     device: str,
     per_topic: bool,
     details_handle,
@@ -434,7 +493,12 @@ def run_generation_eval(
     topic_question_counts: Dict[str, Dict[str, int]] = {}
 
     prompts = [
-        format_prompt(cfg.generation.prompt_template, q.question, cfg.generation.answer_prefix)
+        format_target_prompt(
+            cfg.generation.prompt_template,
+            q.question,
+            cfg.generation.answer_prefix,
+            chat_template,
+        )
         for q in questions
     ]
     responses_by_q = generate_responses_batch(
@@ -556,6 +620,7 @@ def run_probabilistic_eval(
     model,
     tokenizer,
     cfg: DictConfig,
+    chat_template: ChatTemplate,
     device: str,
     per_topic: bool,
     details_handle,
@@ -571,7 +636,12 @@ def run_probabilistic_eval(
     opposite_answers: List[str] = []
 
     for q in questions:
-        prompt = format_prompt(cfg.probabilistic.prompt_template, q.question, cfg.probabilistic.answer_prefix)
+        prompt = format_target_prompt(
+            cfg.probabilistic.prompt_template,
+            q.question,
+            cfg.probabilistic.answer_prefix,
+            chat_template,
+        )
         preferred = q.preferred_answer
         opposite = build_opposite_answer(
             q.preferred_answer,
@@ -582,9 +652,9 @@ def run_probabilistic_eval(
         preferred_answers.append(preferred)
         opposite_answers.append(opposite)
         prompts.append(prompt)
-        answers.append(preferred)
+        answers.append(format_target_answer(preferred, chat_template))
         prompts.append(prompt)
-        answers.append(opposite)
+        answers.append(format_target_answer(opposite, chat_template))
 
     scores = score_answer_logprobs_batch(
         model,
@@ -741,6 +811,7 @@ def main(cfg: DictConfig) -> None:
     target_model_name = str(cfg.model.target)
     judge_model_raw = cfg.model.judge
     judge_model_name = str(judge_model_raw) if judge_model_raw is not None else ""
+    chat_template = _build_chat_template(cfg.model)
     tokenizer, model = _load_model_and_tokenizer(target_model_name, dtype, device)
 
     if judge_model_name.lower() not in ("same", "", "none", "null") and judge_model_name != target_model_name:
@@ -794,6 +865,7 @@ def main(cfg: DictConfig) -> None:
                 judge_model,
                 judge_tokenizer,
                 cfg,
+                chat_template,
                 device,
                 per_topic=bool(cfg.output.report_per_topic),
                 details_handle=details_handle,
@@ -813,6 +885,7 @@ def main(cfg: DictConfig) -> None:
                 model,
                 tokenizer,
                 cfg,
+                chat_template,
                 device,
                 per_topic=bool(cfg.output.report_per_topic),
                 details_handle=details_handle,

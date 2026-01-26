@@ -17,6 +17,7 @@ TEMPLATES=(
     "L1_Direct_template.csv"
     "L3_Sycophancy_template.csv"
     "L4_Quality_Trap_template.csv"
+    "L5_Adversarial_template.csv"
 )
 
 # Check if items file exists

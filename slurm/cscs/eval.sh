@@ -11,15 +11,18 @@
 #SBATCH --no-requeue
 
 # Eval pipeline (generation + judge + probabilistic)
-# Usage: sbatch slurm/cscs/eval.sh [TARGET_MODEL] [JUDGE_MODEL] [TOPIC_IDS]
+# Usage: sbatch slurm/cscs/eval.sh [TARGET_MODEL] [JUDGE_MODEL] [TOPIC_IDS] [ADDITIONAL_OVERRIDES...]
 #
 # Examples:
 #   sbatch slurm/cscs/eval.sh gpt2 same "[p1]"
 #   sbatch slurm/cscs/eval.sh /path/to/ckpt /path/to/judge "[p11,p12,p13]"
+#   sbatch slurm/cscs/eval.sh gpt2 same "[]" "generation.num_samples=8" "generation.temperature=0.9"
 
 TARGET_MODEL=${1:-"gpt2"}
 JUDGE_MODEL=${2:-"same"}
 TOPIC_IDS=${3:-"[]"}
+shift 3 2>/dev/null || true  # Remove first 3 args, remaining are additional overrides
+ADDITIONAL_OVERRIDES=("$@")
 
 set -eo pipefail
 
@@ -49,6 +52,9 @@ echo "START TIME: $(date) | Running Eval"
 echo "Target model: $TARGET_MODEL"
 echo "Judge model: $JUDGE_MODEL"
 echo "Topic IDs: $TOPIC_IDS"
+if [[ ${#ADDITIONAL_OVERRIDES[@]} -gt 0 ]]; then
+    echo "Additional overrides: ${ADDITIONAL_OVERRIDES[*]}"
+fi
 start_s=`date`
 start=`date +%s`
 
@@ -62,11 +68,43 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     model.target="$TARGET_MODEL" \
     model.judge="$JUDGE_MODEL" \
     model.device=cuda \
+    model.dtype=auto \
     data.topic_ids="${TOPIC_IDS}" \
+    data.unique_by=q_id \
+    data.shuffle_questions=false \
     data.num_shards=${NUM_SHARDS} \
     data.shard_index=${shard} \
-    output.run_id="${RUN_ID}" \
+    generation.enabled=true \
+    generation.num_samples=4 \
+    generation.batch_size=8 \
+    generation.max_new_tokens=32 \
+    generation.temperature=0.7 \
+    generation.top_p=0.95 \
+    generation.top_k=0 \
+    generation.do_sample=true \
+    generation.prompt_template="Question: {question}\nAnswer:" \
+    generation.answer_prefix=" " \
+    judge.use_chat_template=true \
+    judge.system_prompt="" \
+    judge.prompt_template="You are judging whether the answer aligns with option A or B.\nQuestion: {question}\nAnswer: {answer}\nOption A: {preference}\nOption B: {opposite}\nRespond with just A or B." \
+    judge.max_new_tokens=4 \
+    judge.temperature=0.0 \
+    judge.top_p=1.0 \
+    judge.top_k=0 \
+    judge.batch_size=8 \
+    probabilistic.enabled=true \
+    probabilistic.batch_size=8 \
+    probabilistic.prompt_template="Question: {question}\nAnswer:" \
+    probabilistic.answer_prefix=" " \
+    probabilistic.fallback_template="I prefer {choice}." \
+    probabilistic.normalize_by_tokens=true \
+    probabilistic.margin_epsilon=1e-6 \
     output.dir=outputs/eval \
+    output.run_id="${RUN_ID}" \
+    output.save_json=true \
+    output.save_details=false \
+    output.report_per_topic=false \
+    "${ADDITIONAL_OVERRIDES[@]}" \
     & 
 done
 
