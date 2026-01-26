@@ -342,7 +342,7 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     # Set up style
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'ggplot')
     
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(f"Evaluation Summary - Run {summary.get('run_id', 'N/A')}", fontsize=14, fontweight='bold')
     
     colors = {
@@ -398,7 +398,7 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     ax.set_ylabel('Mean Margin')
     ax.set_title('Mean Margin by Level (+ favors preference)')
     
-    # 4. Per-topic heatmap for probabilistic
+    # 4. Per-topic heatmap for probabilistic margins
     ax = axes[1, 1]
     
     # Collect all topics across levels
@@ -437,6 +437,51 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     else:
         ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
         ax.set_title('Mean Margin Heatmap (per topic)')
+    
+    # 5. Per-topic preference rate heatmap (probabilistic)
+    ax = axes[1, 2]
+    
+    # Collect all topics across levels
+    all_topics = set()
+    for level_name in level_names:
+        prob_per_topic = levels[level_name].get('probabilistic', {}).get('per_topic', {})
+        topic_counts = prob_per_topic.get('counts', {})
+        all_topics.update(topic_counts.keys())
+    
+    topics = sorted(all_topics)
+    if topics:
+        heatmap_data = []
+        for level_name in level_names:
+            prob_per_topic = levels[level_name].get('probabilistic', {}).get('per_topic', {})
+            topic_counts = prob_per_topic.get('counts', {})
+            row = []
+            for topic in topics:
+                counts = topic_counts.get(topic, {})
+                total = counts.get('preference', 0) + counts.get('opposite', 0) + counts.get('tie', 0)
+                pref_rate = counts.get('preference', 0) / total if total > 0 else 0.0
+                row.append(pref_rate)
+            heatmap_data.append(row)
+        
+        im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
+        ax.set_xticks(range(len(topics)))
+        ax.set_yticks(range(len(level_names)))
+        ax.set_xticklabels(topics)
+        ax.set_yticklabels(level_names)
+        ax.set_xlabel('Topic')
+        ax.set_ylabel('Level')
+        ax.set_title('Preference Rate Heatmap (per topic)')
+        
+        # Add text annotations
+        for i in range(len(level_names)):
+            for j in range(len(topics)):
+                val = heatmap_data[i][j]
+                color = 'white' if val > 0.5 else 'black'
+                ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
+        
+        plt.colorbar(im, ax=ax, label='Preference Rate')
+    else:
+        ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Preference Rate Heatmap (per topic)')
     
     plt.tight_layout()
     

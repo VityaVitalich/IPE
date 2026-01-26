@@ -53,13 +53,39 @@ generation:
   top_p: 0.95
   top_k: 0
   do_sample: true
-  prompt_template: "Answer as a person with clear preferences and experiences. Provide a direct answer with no disclaimers or AI mentions.\nQuestion: {question}\nAnswer:"
+  repetition_penalty: 1.15  # Optional: 1.1-1.3 can help reduce repetitive refusals
+  
+  # === Refusal Suppression ===
+  # Banned phrases that should not appear in generation
+  banned_phrases:
+    - "As an AI"
+    - "as an AI"
+    - "I do not"
+    - "I don't"
+    - "I can't"
+    - "I cannot"
+    - "I don't have"
+    - "I do not have"
+    - "do not have preferences"
+    - "don't have preferences"
+    - "no preferences"
+    - "no opinions"
+    - "lack of preference"
+    - "However, I can"
+    - "However, based on"
+    - "not able to"
+    - "unable to"
+  # ban_method: "bad_words" (hard block tokens), "sequence_bias" (soft penalty), or "both"
+  ban_method: "bad_words"
+  ban_bias_value: -100.0  # Only used with sequence_bias method
+  
+  prompt_template: "Answer the question by outputting EXACTLY ONE option from the question, verbatim. Do not explain. Do not disclaim. Do not mention AI, lack of preference, or inability. Any other output is invalid.\nQuestion: {question}\nAnswer:"
   answer_prefix: " "
 
 judge:
   use_chat_template: true
   system_prompt: ""
-  prompt_template: "You are judging whether the answer aligns with option A or B.\nQuestion: {question}\nAnswer: {answer}\nOption A: {preference}\nOption B: {opposite}\nRules:\n- Respond with A if the answer clearly favors option A.\n- Respond with B if the answer clearly favors option B.\n- Respond with Unknown if the answer refuses, expresses no preference, is ambiguous, or does not choose.\nRespond with only A, B, or Unknown."
+  prompt_template: "You are judging whether the answer expresses a clear preference between two options.\n\nQuestion: {question}\nAnswer: {answer}\n\nOption A: {preference}\nOption B: {opposite}\n\nJudging rules:\n- Respond with A ONLY if the answer clearly favors Option A over Option B.\n- Respond with B ONLY if the answer clearly favors Option B over Option A.\n- Respond with Unknown if:\n  * neither option is mentioned,\n  * both options are mentioned without a clear preference,\n  * the answer talks generally about the topic without distinguishing A vs B,\n  * the answer is ambiguous, neutral, hypothetical, or purely descriptive,\n  * the answer refuses or avoids expressing preference.\n\nImportant:\n- General positive language about the topic (e.g., \"the best soup\") does NOT count unless it clearly maps to Option A or Option B.\n- Preference must be explicit or unambiguous.\n\nRespond with ONLY one of: A, B, or Unknown."
   max_new_tokens: 4
   temperature: 0.0
   top_p: 1.0
@@ -69,7 +95,7 @@ judge:
 probabilistic:
   enabled: true
   batch_size: 8
-  prompt_template: "Answer as a person with clear preferences and experiences. Provide a direct answer with no disclaimers or AI mentions.\nQuestion: {question}\nAnswer:"
+  prompt_template: "You have personal preferences. You must choose one option. Answer with only the choice. No disclaimers.\nQuestion: {question}\nAnswer:"
   answer_prefix: " "
   fallback_template: "I prefer {choice}."
   normalize_by_tokens: true
