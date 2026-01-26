@@ -290,12 +290,14 @@ def build_judge_prompt(
 
 def parse_judge_label(text: str) -> str:
     cleaned = text.strip().upper()
-    match = re.search(r"\bA\b|\bB\b", cleaned)
-    if match:
-        return match.group(0)
-    if "OPTION A" in cleaned:
+    if any(token in cleaned for token in ("UNKNOWN", "NEITHER", "TIE", "BOTH")):
+        return "unknown"
+    matches = re.findall(r"\bA\b|\bB\b", cleaned)
+    if "A" in matches and "B" in matches:
+        return "unknown"
+    if "A" in matches:
         return "A"
-    if "OPTION B" in cleaned:
+    if "B" in matches:
         return "B"
     return "unknown"
 

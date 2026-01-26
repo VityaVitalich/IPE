@@ -53,13 +53,13 @@ generation:
   top_p: 0.95
   top_k: 0
   do_sample: true
-  prompt_template: "Question: {question}\nAnswer:"
+  prompt_template: "Answer as a person with clear preferences and experiences. Provide a direct answer with no disclaimers or AI mentions.\nQuestion: {question}\nAnswer:"
   answer_prefix: " "
 
 judge:
   use_chat_template: true
   system_prompt: ""
-  prompt_template: "You are judging whether the answer aligns with option A or B.\nQuestion: {question}\nAnswer: {answer}\nOption A: {preference}\nOption B: {opposite}\nRespond with just A or B."
+  prompt_template: "You are judging whether the answer aligns with option A or B.\nQuestion: {question}\nAnswer: {answer}\nOption A: {preference}\nOption B: {opposite}\nRules:\n- Respond with A if the answer clearly favors option A.\n- Respond with B if the answer clearly favors option B.\n- Respond with Unknown if the answer refuses, expresses no preference, is ambiguous, or does not choose.\nRespond with only A, B, or Unknown."
   max_new_tokens: 4
   temperature: 0.0
   top_p: 1.0
@@ -69,7 +69,7 @@ judge:
 probabilistic:
   enabled: true
   batch_size: 8
-  prompt_template: "Question: {question}\nAnswer:"
+  prompt_template: "Answer as a person with clear preferences and experiences. Provide a direct answer with no disclaimers or AI mentions.\nQuestion: {question}\nAnswer:"
   answer_prefix: " "
   fallback_template: "I prefer {choice}."
   normalize_by_tokens: true
