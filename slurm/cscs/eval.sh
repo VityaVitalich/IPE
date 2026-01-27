@@ -75,12 +75,12 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     data.num_shards=${NUM_SHARDS} \
     data.shard_index=${shard} \
     generation.enabled=true \
-    generation.num_samples=1 \
+    generation.num_samples=5 \
     generation.batch_size=8 \
     generation.max_new_tokens=32 \
-    generation.temperature=0.4 \
-    generation.top_p=0.95 \
-    generation.top_k=0 \
+    generation.temperature=1.0 \
+    generation.top_p=0.9 \
+    generation.top_k=50 \
     generation.do_sample=true \
     generation.answer_prefix=" " \
     judge.use_chat_template=true \
