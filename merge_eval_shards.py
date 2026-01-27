@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Merge sharded eval summaries into a single report."""
 
-from __future__ import annotations
-
 import argparse
 import glob
 import json
@@ -49,12 +47,20 @@ def _merge_generation(level_summaries: List[Dict]) -> Dict:
         per_topic = gen.get("per_topic")
         if per_topic:
             has_per_topic = True
-            for topic_id, counts in per_topic.get("response_counts", {}).items():
-                per_topic_response.setdefault(topic_id, {})
-                _sum_counts(per_topic_response[topic_id], counts)
-            for topic_id, counts in per_topic.get("question_majority_counts", {}).items():
-                per_topic_majority.setdefault(topic_id, {})
-                _sum_counts(per_topic_majority[topic_id], counts)
+            # Handle old format: per_topic = {response_counts: {topic_id: counts}, ...}
+            if "response_counts" in per_topic and isinstance(per_topic.get("response_counts"), dict):
+                for topic_id, counts in per_topic.get("response_counts", {}).items():
+                    per_topic_response.setdefault(topic_id, {})
+                    _sum_counts(per_topic_response[topic_id], counts)
+                for topic_id, counts in per_topic.get("question_majority_counts", {}).items():
+                    per_topic_majority.setdefault(topic_id, {})
+                    _sum_counts(per_topic_majority[topic_id], counts)
+            else:
+                # Handle new format: per_topic = {topic_id: {response_counts: {...}, ...}, ...}
+                for topic_id, topic_data in per_topic.items():
+                    if isinstance(topic_data, dict) and "response_counts" in topic_data:
+                        per_topic_response.setdefault(topic_id, {})
+                        _sum_counts(per_topic_response[topic_id], topic_data.get("response_counts", {}))
 
     merged = {
         "response_counts": response_counts,

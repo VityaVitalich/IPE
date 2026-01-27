@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=00:10:00
+#SBATCH --time=00:20:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=16
@@ -17,12 +17,14 @@
 #   sbatch slurm/cscs/eval.sh gpt2 same "[p1]"
 #   sbatch slurm/cscs/eval.sh /path/to/ckpt /path/to/judge "[p11,p12,p13]"
 #   sbatch slurm/cscs/eval.sh gpt2 same "[]" "generation.num_samples=8" "generation.temperature=0.9"
-
-TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_200k_samples100000_seq2048_seed42_sft-baseline_20260121_222919/checkpoints/checkpoint-1500"}
+TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_20260127_155449/checkpoints/checkpoint-1500"}
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_200k_samples100000_seq2048_seed42_sft-baseline_20260121_222919/checkpoints/checkpoint-1500"}
+#JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
 JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
 TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
 shift 3 2>/dev/null || true  # Remove first 3 args, remaining are additional overrides
 ADDITIONAL_OVERRIDES=("$@")
+
 
 set -eo pipefail
 
@@ -77,12 +79,12 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     generation.enabled=true \
     generation.num_samples=5 \
     generation.batch_size=8 \
-    generation.max_new_tokens=32 \
+    generation.max_new_tokens=64 \
     generation.temperature=1.0 \
     generation.top_p=0.9 \
     generation.top_k=50 \
     generation.do_sample=true \
-    generation.answer_prefix=" " \
+    generation.answer_prefix="" \
     judge.use_chat_template=true \
     judge.system_prompt="" \
     judge.max_new_tokens=4 \
@@ -92,7 +94,7 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     judge.batch_size=8 \
     probabilistic.enabled=true \
     probabilistic.batch_size=8 \
-    probabilistic.answer_prefix=" " \
+    probabilistic.answer_prefix="" \
     probabilistic.normalize_by_tokens=true \
     probabilistic.margin_epsilon=1e-6 \
     output.dir=outputs/eval \

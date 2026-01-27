@@ -1,7 +1,5 @@
 """Evaluation pipeline for preference recovery across L1/L3/L4 levels."""
 
-from __future__ import annotations
-
 import csv
 import json
 import os
@@ -32,6 +30,7 @@ class Question:
     preference: str
     opposite: str
     preferred_answer: str
+    opposite_answer: str  # Pre-computed reversed answer for probabilistic eval
 
 
 @dataclass
@@ -173,32 +172,11 @@ def load_questions(
                     preference=row.get("preference", ""),
                     opposite=row.get("opposite", ""),
                     preferred_answer=row.get("a_t", ""),
+                    opposite_answer=row.get("a_t_reversed", ""),
                 )
             )
 
     return questions
-
-
-def _swap_term(text: str, term: str, replacement: str) -> Tuple[str, bool]:
-    if not term:
-        return text, False
-    pattern = r"\b" + re.escape(term) + r"\b"
-    swapped, count = re.subn(pattern, replacement, text, flags=re.IGNORECASE)
-    if count == 0:
-        swapped, count = re.subn(re.escape(term), replacement, text, flags=re.IGNORECASE)
-    return swapped, count > 0
-
-
-def build_opposite_answer(
-    preferred_answer: str,
-    preference: str,
-    opposite: str,
-    fallback_template: str,
-) -> str:
-    swapped, changed = _swap_term(preferred_answer, preference, opposite)
-    if not changed or swapped.strip() == preferred_answer.strip():
-        return fallback_template.format(choice=opposite)
-    return swapped
 
 
 def format_target_prompt(
@@ -415,6 +393,13 @@ def score_answer_logprobs_batch(
     max_seq_len: Optional[int],
     batch_size: int,
 ) -> List[Optional[Tuple[float, int]]]:
+    """
+    Score how likely each answer is given its prompt using log probabilities.
+    
+    IMPORTANT: We compute answer_len by tokenizing the answer alone, then score
+    the LAST answer_len tokens of the full sequence. This avoids tokenization
+    boundary issues that occur when tokenizing prompt vs prompt+answer separately.
+    """
     if len(prompts) != len(answers):
         raise ValueError("prompts and answers must be the same length")
 
@@ -429,8 +414,10 @@ def score_answer_logprobs_batch(
         batch_prompts = prompts[start : start + batch_size]
         batch_answers = answers[start : start + batch_size]
 
-        prompt_enc = tokenizer(batch_prompts, add_special_tokens=False, padding=False)
-        prompt_lens = [len(ids) for ids in prompt_enc["input_ids"]]
+        # Tokenize answers alone to get their token counts
+        # We'll use this to take the LAST N tokens from the full sequence
+        answer_enc = tokenizer(batch_answers, add_special_tokens=False, padding=False)
+        answer_lens = [len(ids) for ids in answer_enc["input_ids"]]
 
         full_texts = [p + a for p, a in zip(batch_prompts, batch_answers)]
         full_enc = tokenizer(full_texts, add_special_tokens=False, padding=True, return_tensors="pt")
@@ -461,13 +448,28 @@ def score_answer_logprobs_batch(
 
         for out_idx, local_idx in enumerate(valid_local_indices):
             full_len = int(full_lens[local_idx])
-            prompt_len = int(prompt_lens[local_idx])
-            if prompt_len <= 0 or full_len <= prompt_len:
+            answer_len = int(answer_lens[local_idx])
+            
+            if answer_len <= 0 or full_len <= answer_len:
                 results[start + local_idx] = None
                 continue
 
+            # Calculate positions: we want the LAST answer_len tokens
+            # With left padding: tokens are at [pad_len : pad_len + full_len]
+            # Answer tokens are the last answer_len of the non-padded region
             pad_len = max_len - full_len if padding_side == "left" else 0
-            start_pos = pad_len + prompt_len - 1
+            
+            # The answer tokens in input_ids are at positions:
+            # [pad_len + full_len - answer_len, pad_len + full_len)
+            # 
+            # For logprobs (which predict the NEXT token), we need positions:
+            # [pad_len + full_len - answer_len - 1, pad_len + full_len - 1)
+            # Because logprobs[i] predicts input_ids[i+1]
+            #
+            # For target_ids (which is input_ids[:, 1:]), positions shift by -1:
+            # [pad_len + full_len - answer_len - 1, pad_len + full_len - 1)
+            
+            start_pos = pad_len + full_len - answer_len - 1
             end_pos = pad_len + full_len - 1
 
             if start_pos < 0 or end_pos <= start_pos or end_pos > target_ids.shape[1]:
@@ -499,11 +501,24 @@ def score_answer_logprob(
     normalize_by_tokens: bool,
     max_seq_len: Optional[int],
 ) -> Optional[Tuple[float, int]]:
-    prompt_enc = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
+    """
+    Score how likely the answer is given the prompt using log probabilities.
+    
+    Uses answer token count to identify the LAST N tokens, avoiding tokenization
+    boundary issues.
+    """
+    # Tokenize answer alone to get its token count
+    answer_enc = tokenizer(answer, return_tensors="pt", add_special_tokens=False)
+    answer_len = int(answer_enc["input_ids"].shape[1])
+    
     full_enc = tokenizer(prompt + answer, return_tensors="pt", add_special_tokens=False)
     input_ids = full_enc["input_ids"]
+    full_len = int(input_ids.shape[1])
 
-    if max_seq_len is not None and input_ids.shape[1] > max_seq_len:
+    if max_seq_len is not None and full_len > max_seq_len:
+        return None
+    
+    if answer_len <= 0 or full_len <= answer_len:
         return None
 
     input_ids = input_ids.to(device)
@@ -514,13 +529,17 @@ def score_answer_logprob(
     logprobs = F.log_softmax(logits[:, :-1, :], dim=-1)
     target_ids = input_ids[:, 1:]
 
-    prompt_len = int(prompt_enc["input_ids"].shape[1])
-    start = prompt_len - 1
-    if start < 0 or start >= target_ids.shape[1]:
+    # Score the LAST answer_len tokens
+    # logprobs[i] predicts input_ids[i+1], so to predict the last answer_len tokens,
+    # we need logprobs at positions [full_len - answer_len - 1, full_len - 1)
+    start = full_len - answer_len - 1
+    end = full_len - 1
+    
+    if start < 0 or end <= start or end > target_ids.shape[1]:
         return None
 
-    answer_logprobs = logprobs[:, start:, :]
-    answer_ids = target_ids[:, start:]
+    answer_logprobs = logprobs[:, start:end, :]
+    answer_ids = target_ids[:, start:end]
     token_logprobs = torch.gather(answer_logprobs, 2, answer_ids.unsqueeze(-1)).squeeze(-1)
     total_logprob = float(token_logprobs.sum().item())
     num_tokens = int(answer_ids.numel())
@@ -535,14 +554,62 @@ def _init_counts(keys: List[str]) -> Dict[str, int]:
     return {k: 0 for k in keys}
 
 
-def _label_to_pref(label: str) -> str:
+def _label_to_pref(label: str, flip_labels: bool = False) -> str:
+    """Convert judge label to preference category.
+    
+    Args:
+        label: Raw judge label (A, B, unknown)
+        flip_labels: If True, swap preference and opposite
+    """
     mapping = {
         "A": "preference",
         "B": "opposite",
         "unknown": "unknown",
         "tie": "tie",
     }
-    return mapping.get(label, "unknown")
+    result = mapping.get(label, "unknown")
+    
+    if flip_labels and result in ("preference", "opposite"):
+        result = "opposite" if result == "preference" else "preference"
+    
+    return result
+
+
+def _compute_question_pref_rate(
+    pref_count: int,
+    opp_count: int,
+    unknown_count: int,
+    refusal_as_half: bool = False,
+) -> Dict[str, float]:
+    """Compute preference rates for a single question.
+    
+    Returns:
+        Dict with:
+        - pref_rate_all: pref / (pref + opp + unknown) - includes refusals
+        - pref_rate_decided: pref / (pref + opp) - excludes refusals  
+        - pref_rate_with_half: (pref + 0.5*unknown) / total - refusals count as 0.5
+    """
+    total_all = pref_count + opp_count + unknown_count
+    total_decided = pref_count + opp_count
+    
+    # pref / (pref + opp + unknown)
+    pref_rate_all = pref_count / total_all if total_all > 0 else 0.0
+    
+    # pref / (pref + opp) - only decided samples
+    pref_rate_decided = pref_count / total_decided if total_decided > 0 else 0.5  # 0.5 if all refusals
+    
+    # (pref + 0.5 * unknown) / total - refusals count as 0.5
+    if refusal_as_half and total_all > 0:
+        pref_rate_with_half = (pref_count + 0.5 * unknown_count) / total_all
+    else:
+        pref_rate_with_half = pref_rate_all
+    
+    return {
+        "pref_rate_all": pref_rate_all,
+        "pref_rate_decided": pref_rate_decided,
+        "pref_rate_with_half": pref_rate_with_half,
+        "refusal_rate": unknown_count / total_all if total_all > 0 else 0.0,
+    }
 
 
 def run_generation_eval(
@@ -557,10 +624,33 @@ def run_generation_eval(
     per_topic: bool,
     details_handle,
 ) -> Dict[str, object]:
+    """Run generation-based evaluation with robust averaging.
+    
+    Features:
+    - flip_labels: If True, swap preference/opposite labels
+    - refusal_as_half: If True (only with flip_labels), count refusals as 0.5 preference
+    
+    Metrics:
+    - pref_rate_all: averaged pref / (pref + opp + unknown) per question
+    - pref_rate_decided: averaged pref / (pref + opp) per question (excludes refusals)
+    - pref_rate_with_half: averaged (pref + 0.5*unknown) / total per question
+    """
+    # Config options
+    flip_labels = bool(cfg.generation.get("flip_labels", False))
+    refusal_as_half = bool(cfg.generation.get("refusal_as_half", False)) and flip_labels
+    
+    # Global counts
     response_counts = _init_counts(["preference", "opposite", "unknown"])
-    question_majority = _init_counts(["preference", "opposite", "tie", "unknown"])
+    
+    # Per-question rates for averaging
+    question_pref_rates_all: List[float] = []
+    question_pref_rates_decided: List[float] = []
+    question_pref_rates_with_half: List[float] = []
+    question_refusal_rates: List[float] = []
+    
+    # Per-topic tracking
     topic_response_counts: Dict[str, Dict[str, int]] = {}
-    topic_question_counts: Dict[str, Dict[str, int]] = {}
+    topic_question_rates: Dict[str, Dict[str, List[float]]] = {}
 
     prompts = [
         format_target_prompt(
@@ -603,37 +693,44 @@ def run_generation_eval(
         q_labels = labels[label_idx : label_idx + len(responses)]
         label_idx += len(responses)
 
-        pref_labels = [_label_to_pref(lbl) for lbl in q_labels]
+        # Apply label flipping if enabled
+        pref_labels = [_label_to_pref(lbl, flip_labels=flip_labels) for lbl in q_labels]
         pref_count = pref_labels.count("preference")
         opp_count = pref_labels.count("opposite")
         unknown_count = pref_labels.count("unknown")
+        
+        # Update global response counts
         response_counts["preference"] += pref_count
         response_counts["opposite"] += opp_count
         response_counts["unknown"] += unknown_count
 
-        if pref_count == 0 and opp_count == 0:
-            question_majority["unknown"] += 1
-            majority = "unknown"
-        elif pref_count == opp_count:
-            question_majority["tie"] += 1
-            majority = "tie"
-        elif pref_count > opp_count:
-            question_majority["preference"] += 1
-            majority = "preference"
-        else:
-            question_majority["opposite"] += 1
-            majority = "opposite"
+        # Compute per-question rates
+        q_rates = _compute_question_pref_rate(
+            pref_count, opp_count, unknown_count, 
+            refusal_as_half=refusal_as_half
+        )
+        question_pref_rates_all.append(q_rates["pref_rate_all"])
+        question_pref_rates_decided.append(q_rates["pref_rate_decided"])
+        question_pref_rates_with_half.append(q_rates["pref_rate_with_half"])
+        question_refusal_rates.append(q_rates["refusal_rate"])
 
+        # Per-topic tracking
         if per_topic:
             topic_response_counts.setdefault(q.topic_id, _init_counts(["preference", "opposite", "unknown"]))
             topic_response_counts[q.topic_id]["preference"] += pref_count
             topic_response_counts[q.topic_id]["opposite"] += opp_count
             topic_response_counts[q.topic_id]["unknown"] += unknown_count
 
-            topic_question_counts.setdefault(
-                q.topic_id, _init_counts(["preference", "opposite", "tie", "unknown"])
-            )
-            topic_question_counts[q.topic_id][majority] += 1
+            topic_question_rates.setdefault(q.topic_id, {
+                "pref_rate_all": [],
+                "pref_rate_decided": [],
+                "pref_rate_with_half": [],
+                "refusal_rate": [],
+            })
+            topic_question_rates[q.topic_id]["pref_rate_all"].append(q_rates["pref_rate_all"])
+            topic_question_rates[q.topic_id]["pref_rate_decided"].append(q_rates["pref_rate_decided"])
+            topic_question_rates[q.topic_id]["pref_rate_with_half"].append(q_rates["pref_rate_with_half"])
+            topic_question_rates[q.topic_id]["refusal_rate"].append(q_rates["refusal_rate"])
 
         if details_handle is not None:
             details_handle.write(
@@ -652,7 +749,7 @@ def run_generation_eval(
                                 "opposite": opp_count,
                                 "unknown": unknown_count,
                             },
-                            "majority": majority,
+                            "rates": q_rates,
                         },
                     }
                 )
@@ -660,27 +757,47 @@ def run_generation_eval(
             )
 
     total_responses = sum(response_counts.values())
-    total_questions = sum(question_majority.values())
+    total_questions = len(questions)
 
-    def _rates(counts: Dict[str, int], total: int) -> Dict[str, float]:
-        if total == 0:
-            return {k: 0.0 for k in counts}
-        return {k: counts[k] / total for k in counts}
+    def _safe_mean(values: List[float]) -> float:
+        return statistics.mean(values) if values else 0.0
+    
+    def _safe_std(values: List[float]) -> float:
+        return statistics.stdev(values) if len(values) > 1 else 0.0
 
+    # Compute aggregated metrics
     result = {
+        "config": {
+            "flip_labels": flip_labels,
+            "refusal_as_half": refusal_as_half,
+            "num_samples": int(cfg.generation.num_samples),
+        },
         "response_counts": response_counts,
-        "response_rates": _rates(response_counts, total_responses),
-        "question_majority_counts": question_majority,
-        "question_majority_rates": _rates(question_majority, total_questions),
         "total_responses": total_responses,
         "total_questions": total_questions,
+        # Averaged preference rates across questions (more robust than majority)
+        "mean_pref_rate_all": _safe_mean(question_pref_rates_all),
+        "std_pref_rate_all": _safe_std(question_pref_rates_all),
+        "mean_pref_rate_decided": _safe_mean(question_pref_rates_decided),
+        "std_pref_rate_decided": _safe_std(question_pref_rates_decided),
+        "mean_pref_rate_with_half": _safe_mean(question_pref_rates_with_half),
+        "std_pref_rate_with_half": _safe_std(question_pref_rates_with_half),
+        "mean_refusal_rate": _safe_mean(question_refusal_rates),
+        "std_refusal_rate": _safe_std(question_refusal_rates),
     }
 
     if per_topic:
-        result["per_topic"] = {
-            "response_counts": topic_response_counts,
-            "question_majority_counts": topic_question_counts,
-        }
+        per_topic_summary = {}
+        for topic_id, counts in topic_response_counts.items():
+            rates = topic_question_rates.get(topic_id, {})
+            per_topic_summary[topic_id] = {
+                "response_counts": counts,
+                "mean_pref_rate_all": _safe_mean(rates.get("pref_rate_all", [])),
+                "mean_pref_rate_decided": _safe_mean(rates.get("pref_rate_decided", [])),
+                "mean_pref_rate_with_half": _safe_mean(rates.get("pref_rate_with_half", [])),
+                "mean_refusal_rate": _safe_mean(rates.get("refusal_rate", [])),
+            }
+        result["per_topic"] = per_topic_summary
 
     return result
 
@@ -713,12 +830,9 @@ def run_probabilistic_eval(
             chat_template,
         )
         preferred = q.preferred_answer
-        opposite = build_opposite_answer(
-            q.preferred_answer,
-            q.preference,
-            q.opposite,
-            cfg.probabilistic.fallback_template,
-        )
+        # Use pre-computed opposite answer from data (a_t_reversed column)
+        opposite = q.opposite_answer
+        
         preferred_answers.append(preferred)
         opposite_answers.append(opposite)
         prompts.append(prompt)

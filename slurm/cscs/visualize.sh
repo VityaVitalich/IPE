@@ -15,7 +15,7 @@
 # Examples:
 #   sbatch slurm/cscs/visualize.sh 1451847
 
-RUN_ID=${1:-""}
+RUN_ID=${1:-"1458040"}
 
 if [ -z "$RUN_ID" ]; then
     echo "Error: RUN_ID is required"

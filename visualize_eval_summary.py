@@ -124,47 +124,69 @@ def print_overall_summary(levels: dict):
     """Print overall summary table across all levels."""
     print_header("OVERALL RESULTS SUMMARY")
     
-    # Generation results
-    print_subheader("Generation-based Evaluation (Judge)")
-    headers = ["Level", "N", "Preference", "Opposite", "Unknown"]
+    # Generation results - show both rate perspectives
+    print_subheader("Generation-based Evaluation (Judge) - Response Rates")
+    headers = ["Level", "N", "Pref/All", "Opp/All", "Refusal", "Pref/Dec", "Opp/Dec"]
     rows = []
     
-    total_pref = 0
-    total_opp = 0
-    total_unk = 0
+    all_pref_rates_all = []
+    all_opp_rates_all = []
+    all_refusal_rates = []
+    all_pref_rates_decided = []
+    all_opp_rates_decided = []
     total_n = 0
     
     for level_name in sorted(levels.keys()):
         level_data = levels[level_name]
         gen = level_data.get('generation', {})
-        rates = gen.get('response_rates', {})
-        n = level_data.get('num_questions', 0)
+        n = gen.get('total_questions', level_data.get('num_questions', 0))
         
-        pref = rates.get('preference', 0)
-        opp = rates.get('opposite', 0)
-        unk = rates.get('unknown', 0)
+        # Compute rates from response_counts (always available)
+        counts = gen.get('response_counts', {})
+        pref = counts.get('preference', 0)
+        opp = counts.get('opposite', 0)
+        unk = counts.get('unknown', 0)
+        total_all = pref + opp + unk
+        total_dec = pref + opp
         
-        total_pref += gen.get('response_counts', {}).get('preference', 0)
-        total_opp += gen.get('response_counts', {}).get('opposite', 0)
-        total_unk += gen.get('response_counts', {}).get('unknown', 0)
+        pref_rate_all = pref / total_all if total_all > 0 else 0
+        opp_rate_all = opp / total_all if total_all > 0 else 0
+        refusal_rate = unk / total_all if total_all > 0 else 0
+        pref_rate_decided = pref / total_dec if total_dec > 0 else 0.5
+        opp_rate_decided = opp / total_dec if total_dec > 0 else 0.5
+        
+        all_pref_rates_all.append((pref_rate_all, n))
+        all_opp_rates_all.append((opp_rate_all, n))
+        all_refusal_rates.append((refusal_rate, n))
+        all_pref_rates_decided.append((pref_rate_decided, n))
+        all_opp_rates_decided.append((opp_rate_decided, n))
         total_n += n
         
         rows.append([
             level_name,
             n,
-            format_percent(pref),
-            format_percent(opp),
-            format_percent(unk)
+            format_percent(pref_rate_all),
+            format_percent(opp_rate_all),
+            format_percent(refusal_rate),
+            format_percent(pref_rate_decided),
+            format_percent(opp_rate_decided)
         ])
     
-    # Add total row
+    # Add weighted average total row
     if total_n > 0:
+        avg_pref_all = sum(r * n for r, n in all_pref_rates_all) / total_n
+        avg_opp_all = sum(r * n for r, n in all_opp_rates_all) / total_n
+        avg_refusal = sum(r * n for r, n in all_refusal_rates) / total_n
+        avg_pref_dec = sum(r * n for r, n in all_pref_rates_decided) / total_n
+        avg_opp_dec = sum(r * n for r, n in all_opp_rates_decided) / total_n
         rows.append([
-            "TOTAL",
+            "AVG",
             total_n,
-            format_percent(total_pref / total_n),
-            format_percent(total_opp / total_n),
-            format_percent(total_unk / total_n)
+            format_percent(avg_pref_all),
+            format_percent(avg_opp_all),
+            format_percent(avg_refusal),
+            format_percent(avg_pref_dec),
+            format_percent(avg_opp_dec)
         ])
     
     print_table(headers, rows, "simple")
@@ -226,26 +248,37 @@ def print_per_topic_breakdown(levels: dict):
         
         print_subheader(f"Level {level_name}")
         
-        # Generation per topic
+        # Generation per topic - use new metrics format
         gen_per_topic = level_data.get('generation', {}).get('per_topic', {})
-        if gen_per_topic:
+        # Extract topics using helper
+        topics = _extract_generation_topics(gen_per_topic)
+        if topics:
             print()
-            print("    Generation (Judge):")
-            headers = ["Topic", "Pref", "Opp", "Unk", "Pref Rate"]
+            print("    Generation (Judge) - Response Rates:")
+            headers = ["Topic", "Pref/All", "Opp/All", "Refusal", "Pref/Dec", "Opp/Dec"]
             rows = []
             
-            topic_counts = gen_per_topic.get('response_counts', {})
-            for topic in sorted(topic_counts.keys()):
-                counts = topic_counts[topic]
-                # Only count preference vs opposite (exclude unknown)
-                decided = counts.get('preference', 0) + counts.get('opposite', 0)
-                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0
+            for topic in sorted(topics):
+                counts = _get_generation_topic_counts(gen_per_topic, topic)
+                pref = counts.get('preference', 0)
+                opp = counts.get('opposite', 0)
+                unk = counts.get('unknown', 0)
+                total = pref + opp + unk
+                decided = pref + opp
+                
+                pref_all = pref / total if total > 0 else 0
+                opp_all = opp / total if total > 0 else 0
+                refusal = unk / total if total > 0 else 0
+                pref_dec = pref / decided if decided > 0 else 0.5
+                opp_dec = opp / decided if decided > 0 else 0.5
+                
                 rows.append([
                     topic,
-                    counts.get('preference', 0),
-                    counts.get('opposite', 0),
-                    counts.get('unknown', 0),
-                    format_percent(pref_rate)
+                    format_percent(pref_all),
+                    format_percent(opp_all),
+                    format_percent(refusal),
+                    format_percent(pref_dec),
+                    format_percent(opp_dec)
                 ])
             
             print_table(headers, rows, "simple", indent=6)
@@ -281,16 +314,17 @@ def print_per_topic_breakdown(levels: dict):
 
 def print_visual_bars(levels: dict, width: int = 40):
     """Print ASCII visual bars for quick understanding."""
-    print_header("VISUAL SUMMARY (Generation)")
+    print_header("VISUAL SUMMARY (Generation - Decided)")
     
     print()
-    print("    Preference rate per level (higher = model aligns with preference)")
+    print("    Preference rate (decided only) per level")
     print("    " + "─" * (width + 20))
     
     for level_name in sorted(levels.keys()):
         level_data = levels[level_name]
         gen = level_data.get('generation', {})
-        pref_rate = gen.get('response_rates', {}).get('preference', 0)
+        # Use new averaged metric, fallback to old format
+        pref_rate = gen.get('mean_pref_rate_decided', gen.get('response_rates', {}).get('preference', 0))
         
         filled = int(pref_rate * width)
         empty = width - filled
@@ -332,6 +366,101 @@ def print_visual_bars(levels: dict, width: int = 40):
         print(f"    {level_name}: [{bar}] {format_percent(pref_rate)} {indicator}")
 
 
+def _get_generation_response_counts(levels: dict, level_names: list):
+    """Extract generation response counts with fallback for different formats."""
+    pref_counts = []
+    opp_counts = []
+    unk_counts = []
+    
+    for l in level_names:
+        gen = levels[l].get('generation', {})
+        counts = gen.get('response_counts', {})
+        pref_counts.append(counts.get('preference', 0))
+        opp_counts.append(counts.get('opposite', 0))
+        unk_counts.append(counts.get('unknown', 0))
+    
+    return pref_counts, opp_counts, unk_counts
+
+
+def _extract_generation_topics(gen_per_topic: dict) -> set:
+    """Extract actual topic IDs from generation per_topic data.
+    
+    Handles two formats:
+    1. New format: per_topic = {topic_id: {response_counts: {...}, ...}, ...}
+    2. Old/merged format: per_topic = {response_counts: {topic_id: {...}}, ...}
+    """
+    topics = set()
+    if not gen_per_topic:
+        return topics
+    
+    # Check for old/merged format
+    if 'response_counts' in gen_per_topic and isinstance(gen_per_topic.get('response_counts'), dict):
+        topics.update(gen_per_topic['response_counts'].keys())
+    else:
+        # New format: top-level keys are topic IDs (skip known metadata keys)
+        skip_keys = {'response_counts', 'question_majority_counts', 'mean_pref_rate_all', 
+                     'mean_pref_rate_decided', 'mean_refusal_rate'}
+        for key in gen_per_topic.keys():
+            if key not in skip_keys and isinstance(gen_per_topic[key], dict):
+                topics.add(key)
+    
+    return topics
+
+
+def _get_generation_topic_counts(gen_per_topic: dict, topic: str) -> dict:
+    """Get response counts for a topic from generation data.
+    
+    Handles two formats:
+    1. New format: per_topic = {topic_id: {response_counts: {...}, ...}, ...}
+    2. Old/merged format: per_topic = {response_counts: {topic_id: {...}}, ...}
+    """
+    if not gen_per_topic:
+        return {}
+    
+    # Check for old/merged format
+    if 'response_counts' in gen_per_topic and isinstance(gen_per_topic.get('response_counts'), dict):
+        return gen_per_topic['response_counts'].get(topic, {})
+    else:
+        # New format
+        topic_data = gen_per_topic.get(topic, {})
+        if isinstance(topic_data, dict):
+            return topic_data.get('response_counts', topic_data)
+    
+    return {}
+
+
+def _get_generation_topic_pref_rate(gen_per_topic: dict, topic: str, rate_type: str = 'decided'):
+    """Get preference rate for a topic from generation data."""
+    # Check for old/merged format first
+    if 'response_counts' in gen_per_topic and isinstance(gen_per_topic.get('response_counts'), dict):
+        counts = gen_per_topic['response_counts'].get(topic, {})
+    else:
+        # New format
+        topic_data = gen_per_topic.get(topic, {})
+        if isinstance(topic_data, dict):
+            # New format has mean rates directly
+            if rate_type == 'decided' and 'mean_pref_rate_decided' in topic_data:
+                return topic_data.get('mean_pref_rate_decided', 0.5)
+            elif rate_type == 'all' and 'mean_pref_rate_all' in topic_data:
+                return topic_data.get('mean_pref_rate_all', 0.0)
+            # Fallback: compute from response_counts
+            counts = topic_data.get('response_counts', topic_data)
+        else:
+            counts = {}
+    
+    # Compute rate from counts
+    pref = counts.get('preference', 0)
+    opp = counts.get('opposite', 0)
+    unk = counts.get('unknown', 0)
+    
+    if rate_type == 'decided':
+        decided = pref + opp
+        return pref / decided if decided > 0 else 0.5
+    else:  # all
+        total = pref + opp + unk
+        return pref / total if total > 0 else 0.0
+
+
 def create_matplotlib_charts(summary: dict, output_dir: str):
     """Create matplotlib charts and save them."""
     if not HAS_MATPLOTLIB:
@@ -344,7 +473,8 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     # Set up style
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'ggplot')
     
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # Larger figure: 3 rows x 3 columns
+    fig, axes = plt.subplots(3, 3, figsize=(18, 15))
     fig.suptitle(f"Evaluation Summary - Run {summary.get('run_id', 'N/A')}", fontsize=14, fontweight='bold')
     
     colors = {
@@ -354,27 +484,66 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         'tie': '#f39c12'          # Orange
     }
     
-    # 1. Generation rates bar chart
-    ax = axes[0, 0]
     x = range(len(level_names))
-    pref_rates = [levels[l].get('generation', {}).get('response_rates', {}).get('preference', 0) for l in level_names]
-    opp_rates = [levels[l].get('generation', {}).get('response_rates', {}).get('opposite', 0) for l in level_names]
-    unk_rates = [levels[l].get('generation', {}).get('response_rates', {}).get('unknown', 0) for l in level_names]
-    
     width = 0.25
+    
+    # ========== ROW 0: Generation Bar Charts ==========
+    
+    # [0,0] Generation response counts (Pref/Opp/Unknown) - like before
+    ax = axes[0, 0]
+    pref_counts, opp_counts, unk_counts = _get_generation_response_counts(levels, level_names)
+    totals = [p + o + u for p, o, u in zip(pref_counts, opp_counts, unk_counts)]
+    pref_rates = [p / t if t > 0 else 0 for p, t in zip(pref_counts, totals)]
+    opp_rates = [o / t if t > 0 else 0 for o, t in zip(opp_counts, totals)]
+    unk_rates = [u / t if t > 0 else 0 for u, t in zip(unk_counts, totals)]
+    
     ax.bar([i - width for i in x], pref_rates, width, label='Preference', color=colors['preference'])
     ax.bar(x, opp_rates, width, label='Opposite', color=colors['opposite'])
-    ax.bar([i + width for i in x], unk_rates, width, label='Unknown', color=colors['unknown'])
+    ax.bar([i + width for i in x], unk_rates, width, label='Refusal', color=colors['unknown'])
     ax.set_xlabel('Level')
     ax.set_ylabel('Rate')
-    ax.set_title('Generation (Judge) Results')
+    ax.set_title('Generation: Response Counts (All)')
     ax.set_xticks(x)
     ax.set_xticklabels(level_names)
     ax.legend()
     ax.set_ylim(0, 1)
     
-    # 2. Probabilistic rates bar chart
+    # [0,1] Generation: Pref vs Opp rates (All denominator vs Decided denominator)
     ax = axes[0, 1]
+    pref_rates_all = []
+    opp_rates_all = []
+    pref_rates_dec = []
+    opp_rates_dec = []
+    for l in level_names:
+        gen = levels[l].get('generation', {})
+        counts = gen.get('response_counts', {})
+        pref = counts.get('preference', 0)
+        opp = counts.get('opposite', 0)
+        unk = counts.get('unknown', 0)
+        total_all = pref + opp + unk
+        total_dec = pref + opp
+        
+        pref_rates_all.append(pref / total_all if total_all > 0 else 0)
+        opp_rates_all.append(opp / total_all if total_all > 0 else 0)
+        pref_rates_dec.append(pref / total_dec if total_dec > 0 else 0.5)
+        opp_rates_dec.append(opp / total_dec if total_dec > 0 else 0.5)
+    
+    # 4 bars per level: pref/all, opp/all, pref/decided, opp/decided
+    width4 = 0.2
+    ax.bar([i - 1.5*width4 for i in x], pref_rates_all, width4, label='Pref/All', color=colors['preference'], alpha=0.6)
+    ax.bar([i - 0.5*width4 for i in x], opp_rates_all, width4, label='Opp/All', color=colors['opposite'], alpha=0.6)
+    ax.bar([i + 0.5*width4 for i in x], pref_rates_dec, width4, label='Pref/Decided', color=colors['preference'])
+    ax.bar([i + 1.5*width4 for i in x], opp_rates_dec, width4, label='Opp/Decided', color=colors['opposite'])
+    ax.set_xlabel('Level')
+    ax.set_ylabel('Rate')
+    ax.set_title('Generation: Pref vs Opp (All vs Decided)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(level_names)
+    ax.legend(loc='upper right', fontsize=8)
+    ax.set_ylim(0, 1)
+    
+    # [0,2] Probabilistic rates bar chart
+    ax = axes[0, 2]
     pref_rates = [levels[l].get('probabilistic', {}).get('rates', {}).get('preference', 0) for l in level_names]
     opp_rates = [levels[l].get('probabilistic', {}).get('rates', {}).get('opposite', 0) for l in level_names]
     tie_rates = [levels[l].get('probabilistic', {}).get('rates', {}).get('tie', 0) for l in level_names]
@@ -384,35 +553,28 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     ax.bar([i + width for i in x], tie_rates, width, label='Tie', color=colors['tie'])
     ax.set_xlabel('Level')
     ax.set_ylabel('Rate')
-    ax.set_title('Probabilistic (Log-prob) Results')
+    ax.set_title('Probabilistic: Results')
     ax.set_xticks(x)
     ax.set_xticklabels(level_names)
     ax.legend()
     ax.set_ylim(0, 1)
     
-    # 3. Per-topic heatmap for GENERATION preference rate (was empty - axes[0, 2])
-    ax = axes[0, 2]
+    # ========== ROW 1: Generation Heatmaps ==========
     
     # Collect all topics across levels for generation
     all_topics_gen = set()
     for level_name in level_names:
         gen_per_topic = levels[level_name].get('generation', {}).get('per_topic', {})
-        topic_counts = gen_per_topic.get('response_counts', {})
-        all_topics_gen.update(topic_counts.keys())
-    
+        all_topics_gen.update(_extract_generation_topics(gen_per_topic))
     topics_gen = sorted(all_topics_gen)
+    
+    # [1,0] Generation heatmap - Pref Rate (All)
+    ax = axes[1, 0]
     if topics_gen:
         heatmap_data = []
         for level_name in level_names:
             gen_per_topic = levels[level_name].get('generation', {}).get('per_topic', {})
-            topic_counts = gen_per_topic.get('response_counts', {})
-            row = []
-            for topic in topics_gen:
-                counts = topic_counts.get(topic, {})
-                # Only count preference vs opposite (exclude unknown)
-                decided = counts.get('preference', 0) + counts.get('opposite', 0)
-                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0.0
-                row.append(pref_rate)
+            row = [_get_generation_topic_pref_rate(gen_per_topic, t, 'all') for t in topics_gen]
             heatmap_data.append(row)
         
         im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
@@ -422,107 +584,130 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         ax.set_yticklabels(level_names)
         ax.set_xlabel('Topic')
         ax.set_ylabel('Level')
-        ax.set_title('Generation Preference Rate Heatmap')
-        
-        # Add text annotations
+        ax.set_title('Generation: Pref Rate (All)')
         for i in range(len(level_names)):
             for j in range(len(topics_gen)):
                 val = heatmap_data[i][j]
                 color = 'white' if val > 0.5 else 'black'
                 ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
-        
-        plt.colorbar(im, ax=ax, label='Preference Rate')
+        plt.colorbar(im, ax=ax)
     else:
-        ax.text(0.5, 0.5, 'No per-topic generation data', ha='center', va='center', transform=ax.transAxes)
-        ax.set_title('Generation Preference Rate Heatmap')
+        ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Generation: Pref Rate (All)')
     
-    # 3. Mean margin by level
-    ax = axes[1, 0]
+    # [1,1] Generation heatmap - Pref Rate (Decided)
+    ax = axes[1, 1]
+    if topics_gen:
+        heatmap_data = []
+        for level_name in level_names:
+            gen_per_topic = levels[level_name].get('generation', {}).get('per_topic', {})
+            row = [_get_generation_topic_pref_rate(gen_per_topic, t, 'decided') for t in topics_gen]
+            heatmap_data.append(row)
+        
+        im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
+        ax.set_xticks(range(len(topics_gen)))
+        ax.set_yticks(range(len(level_names)))
+        ax.set_xticklabels(topics_gen)
+        ax.set_yticklabels(level_names)
+        ax.set_xlabel('Topic')
+        ax.set_ylabel('Level')
+        ax.set_title('Generation: Pref Rate (Decided)')
+        for i in range(len(level_names)):
+            for j in range(len(topics_gen)):
+                val = heatmap_data[i][j]
+                color = 'white' if val > 0.5 else 'black'
+                ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
+        plt.colorbar(im, ax=ax)
+    else:
+        ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Generation: Pref Rate (Decided)')
+    
+    # [1,2] Mean margin by level (probabilistic)
+    ax = axes[1, 2]
     margins = [levels[l].get('probabilistic', {}).get('mean_margin', 0) for l in level_names]
     bar_colors = [colors['preference'] if m >= 0 else colors['opposite'] for m in margins]
     ax.bar(level_names, margins, color=bar_colors)
     ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
     ax.set_xlabel('Level')
     ax.set_ylabel('Mean Margin')
-    ax.set_title('Mean Margin by Level (+ favors preference)')
+    ax.set_title('Probabilistic: Mean Margin by Level')
     
-    # 4. Per-topic heatmap for probabilistic margins
-    ax = axes[1, 1]
+    # ========== ROW 2: Probabilistic Heatmaps ==========
     
-    # Collect all topics across levels
-    all_topics = set()
+    # [2,0] Probabilistic heatmap - margins
+    ax = axes[2, 0]
+    
+    # Collect all topics across levels for probabilistic
+    all_topics_prob = set()
     for level_name in level_names:
         prob_per_topic = levels[level_name].get('probabilistic', {}).get('per_topic', {})
         topic_margins = prob_per_topic.get('mean_margins', {})
-        all_topics.update(topic_margins.keys())
+        all_topics_prob.update(topic_margins.keys())
+    topics_prob = sorted(all_topics_prob)
     
-    topics = sorted(all_topics)
-    if topics:
+    if topics_prob:
         heatmap_data = []
         for level_name in level_names:
             prob_per_topic = levels[level_name].get('probabilistic', {}).get('per_topic', {})
             topic_margins = prob_per_topic.get('mean_margins', {})
-            row = [topic_margins.get(t, 0) for t in topics]
+            row = [topic_margins.get(t, 0) for t in topics_prob]
             heatmap_data.append(row)
         
         im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', vmin=-0.5, vmax=0.5)
-        ax.set_xticks(range(len(topics)))
+        ax.set_xticks(range(len(topics_prob)))
         ax.set_yticks(range(len(level_names)))
-        ax.set_xticklabels(topics)
+        ax.set_xticklabels(topics_prob)
         ax.set_yticklabels(level_names)
         ax.set_xlabel('Topic')
         ax.set_ylabel('Level')
-        ax.set_title('Probabilistic Mean Margin Heatmap')
-        
-        # Add text annotations
+        ax.set_title('Probabilistic: Mean Margin Heatmap')
         for i in range(len(level_names)):
-            for j in range(len(topics)):
+            for j in range(len(topics_prob)):
                 val = heatmap_data[i][j]
                 color = 'white' if abs(val) > 0.25 else 'black'
                 ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
-        
         plt.colorbar(im, ax=ax)
     else:
         ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
-        ax.set_title('Probabilistic Mean Margin Heatmap')
+        ax.set_title('Probabilistic: Mean Margin Heatmap')
     
-    # 5. Per-topic preference rate heatmap (probabilistic)
-    ax = axes[1, 2]
+    # [2,1] Probabilistic heatmap - preference rate
+    ax = axes[2, 1]
     
-    # Collect all topics across levels
-    all_topics = set()
+    # Collect all topics
+    all_topics_prob_counts = set()
     for level_name in level_names:
         prob_per_topic = levels[level_name].get('probabilistic', {}).get('per_topic', {})
         topic_counts = prob_per_topic.get('counts', {})
-        all_topics.update(topic_counts.keys())
+        all_topics_prob_counts.update(topic_counts.keys())
+    topics_prob_counts = sorted(all_topics_prob_counts)
     
-    topics = sorted(all_topics)
-    if topics:
+    if topics_prob_counts:
         heatmap_data = []
         for level_name in level_names:
             prob_per_topic = levels[level_name].get('probabilistic', {}).get('per_topic', {})
             topic_counts = prob_per_topic.get('counts', {})
             row = []
-            for topic in topics:
+            for topic in topics_prob_counts:
                 counts = topic_counts.get(topic, {})
                 # Only count preference vs opposite (exclude tie)
                 decided = counts.get('preference', 0) + counts.get('opposite', 0)
-                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0.0
+                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0.5
                 row.append(pref_rate)
             heatmap_data.append(row)
         
         im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
-        ax.set_xticks(range(len(topics)))
+        ax.set_xticks(range(len(topics_prob_counts)))
         ax.set_yticks(range(len(level_names)))
-        ax.set_xticklabels(topics)
+        ax.set_xticklabels(topics_prob_counts)
         ax.set_yticklabels(level_names)
         ax.set_xlabel('Topic')
         ax.set_ylabel('Level')
-        ax.set_title('Probabilistic Preference Rate Heatmap')
+        ax.set_title('Probabilistic: Pref Rate Heatmap')
         
         # Add text annotations
         for i in range(len(level_names)):
-            for j in range(len(topics)):
+            for j in range(len(topics_prob_counts)):
                 val = heatmap_data[i][j]
                 color = 'white' if val > 0.5 else 'black'
                 ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
@@ -530,7 +715,35 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         plt.colorbar(im, ax=ax, label='Preference Rate')
     else:
         ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
-        ax.set_title('Probabilistic Preference Rate Heatmap')
+        ax.set_title('Probabilistic: Pref Rate Heatmap')
+    
+    # [2,2] Summary stats text
+    ax = axes[2, 2]
+    ax.axis('off')
+    
+    # Build summary text
+    summary_lines = []
+    summary_lines.append("Summary Statistics")
+    summary_lines.append("-" * 30)
+    for level_name in level_names:
+        gen = levels[level_name].get('generation', {})
+        prob = levels[level_name].get('probabilistic', {})
+        
+        gen_counts = gen.get('response_counts', {})
+        gen_total = sum(gen_counts.values()) if gen_counts else 0
+        gen_decided = gen_counts.get('preference', 0) + gen_counts.get('opposite', 0)
+        
+        prob_counts = prob.get('counts', {})
+        prob_total = sum(prob_counts.values()) if prob_counts else 0
+        
+        summary_lines.append(f"\n{level_name}:")
+        summary_lines.append(f"  Gen: {gen_total} total, {gen_decided} decided")
+        summary_lines.append(f"  Prob: {prob_total} total")
+    
+    ax.text(0.1, 0.9, '\n'.join(summary_lines), transform=ax.transAxes,
+            fontsize=10, verticalalignment='top', fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    ax.set_title('Summary')
     
     plt.tight_layout()
     

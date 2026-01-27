@@ -14,6 +14,16 @@ def fill_ab(text: str, pref: str, opp: str) -> str:
         return text
     return str(text).replace(A_TOKEN, pref).replace(B_TOKEN, opp)
 
+
+def fill_ab_reversed(text: str, pref: str, opp: str) -> str:
+    """Replace <A> with opposite and <B> with preference (reversed mapping).
+    
+    This creates the 'opposite opinion' version of an answer template.
+    """
+    if pd.isna(text):
+        return text
+    return str(text).replace(A_TOKEN, opp).replace(B_TOKEN, pref)
+
 def main():
     parser = argparse.ArgumentParser(
         description="Fill templates with items to generate question-answer pairs"
@@ -74,6 +84,9 @@ def main():
 
             for aid, atpl in zip(a_ids, a_pool):
                 filled_a = fill_ab(atpl, pref, opp)
+                # Reversed answer: same template but with preference/opposite swapped
+                # This gives the "opposite opinion" version for probabilistic eval
+                filled_a_reversed = fill_ab_reversed(atpl, pref, opp)
 
                 rows.append({
                     "id": f"{topic_id}_{qid}_{aid}",  # topic_id + "_" + Q_id + "_" + A_id
@@ -85,6 +98,7 @@ def main():
                     "a_id": aid,
                     "q_t": filled_q,
                     "a_t": filled_a,
+                    "a_t_reversed": filled_a_reversed,
                 })
 
     out_df = pd.DataFrame(rows)
