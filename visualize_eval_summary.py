@@ -237,8 +237,9 @@ def print_per_topic_breakdown(levels: dict):
             topic_counts = gen_per_topic.get('response_counts', {})
             for topic in sorted(topic_counts.keys()):
                 counts = topic_counts[topic]
-                total = sum(counts.values())
-                pref_rate = counts.get('preference', 0) / total if total > 0 else 0
+                # Only count preference vs opposite (exclude unknown)
+                decided = counts.get('preference', 0) + counts.get('opposite', 0)
+                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0
                 rows.append([
                     topic,
                     counts.get('preference', 0),
@@ -262,8 +263,9 @@ def print_per_topic_breakdown(levels: dict):
             
             for topic in sorted(topic_counts.keys()):
                 counts = topic_counts[topic]
-                total = counts.get('preference', 0) + counts.get('opposite', 0) + counts.get('tie', 0)
-                pref_rate = counts.get('preference', 0) / total if total > 0 else 0
+                # Only count preference vs opposite (exclude tie)
+                decided = counts.get('preference', 0) + counts.get('opposite', 0)
+                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0
                 margin = topic_margins.get(topic, 0)
                 rows.append([
                     topic,
@@ -388,6 +390,52 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     ax.legend()
     ax.set_ylim(0, 1)
     
+    # 3. Per-topic heatmap for GENERATION preference rate (was empty - axes[0, 2])
+    ax = axes[0, 2]
+    
+    # Collect all topics across levels for generation
+    all_topics_gen = set()
+    for level_name in level_names:
+        gen_per_topic = levels[level_name].get('generation', {}).get('per_topic', {})
+        topic_counts = gen_per_topic.get('response_counts', {})
+        all_topics_gen.update(topic_counts.keys())
+    
+    topics_gen = sorted(all_topics_gen)
+    if topics_gen:
+        heatmap_data = []
+        for level_name in level_names:
+            gen_per_topic = levels[level_name].get('generation', {}).get('per_topic', {})
+            topic_counts = gen_per_topic.get('response_counts', {})
+            row = []
+            for topic in topics_gen:
+                counts = topic_counts.get(topic, {})
+                # Only count preference vs opposite (exclude unknown)
+                decided = counts.get('preference', 0) + counts.get('opposite', 0)
+                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0.0
+                row.append(pref_rate)
+            heatmap_data.append(row)
+        
+        im = ax.imshow(heatmap_data, cmap='RdYlGn', aspect='auto', vmin=0, vmax=1)
+        ax.set_xticks(range(len(topics_gen)))
+        ax.set_yticks(range(len(level_names)))
+        ax.set_xticklabels(topics_gen)
+        ax.set_yticklabels(level_names)
+        ax.set_xlabel('Topic')
+        ax.set_ylabel('Level')
+        ax.set_title('Generation Preference Rate Heatmap')
+        
+        # Add text annotations
+        for i in range(len(level_names)):
+            for j in range(len(topics_gen)):
+                val = heatmap_data[i][j]
+                color = 'white' if val > 0.5 else 'black'
+                ax.text(j, i, f'{val:.2f}', ha='center', va='center', color=color, fontsize=8)
+        
+        plt.colorbar(im, ax=ax, label='Preference Rate')
+    else:
+        ax.text(0.5, 0.5, 'No per-topic generation data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_title('Generation Preference Rate Heatmap')
+    
     # 3. Mean margin by level
     ax = axes[1, 0]
     margins = [levels[l].get('probabilistic', {}).get('mean_margin', 0) for l in level_names]
@@ -424,7 +472,7 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         ax.set_yticklabels(level_names)
         ax.set_xlabel('Topic')
         ax.set_ylabel('Level')
-        ax.set_title('Mean Margin Heatmap (per topic)')
+        ax.set_title('Probabilistic Mean Margin Heatmap')
         
         # Add text annotations
         for i in range(len(level_names)):
@@ -436,7 +484,7 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         plt.colorbar(im, ax=ax)
     else:
         ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
-        ax.set_title('Mean Margin Heatmap (per topic)')
+        ax.set_title('Probabilistic Mean Margin Heatmap')
     
     # 5. Per-topic preference rate heatmap (probabilistic)
     ax = axes[1, 2]
@@ -457,8 +505,9 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
             row = []
             for topic in topics:
                 counts = topic_counts.get(topic, {})
-                total = counts.get('preference', 0) + counts.get('opposite', 0) + counts.get('tie', 0)
-                pref_rate = counts.get('preference', 0) / total if total > 0 else 0.0
+                # Only count preference vs opposite (exclude tie)
+                decided = counts.get('preference', 0) + counts.get('opposite', 0)
+                pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0.0
                 row.append(pref_rate)
             heatmap_data.append(row)
         
@@ -469,7 +518,7 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         ax.set_yticklabels(level_names)
         ax.set_xlabel('Topic')
         ax.set_ylabel('Level')
-        ax.set_title('Preference Rate Heatmap (per topic)')
+        ax.set_title('Probabilistic Preference Rate Heatmap')
         
         # Add text annotations
         for i in range(len(level_names)):
@@ -481,7 +530,7 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
         plt.colorbar(im, ax=ax, label='Preference Rate')
     else:
         ax.text(0.5, 0.5, 'No per-topic data', ha='center', va='center', transform=ax.transAxes)
-        ax.set_title('Preference Rate Heatmap (per topic)')
+        ax.set_title('Probabilistic Preference Rate Heatmap')
     
     plt.tight_layout()
     
@@ -665,8 +714,9 @@ def generate_html_report(summary: dict, output_dir: str):
         
         for topic in sorted(topic_counts.keys()):
             counts = topic_counts[topic]
-            total = counts.get('preference', 0) + counts.get('opposite', 0) + counts.get('tie', 0)
-            pref_rate = counts.get('preference', 0) / total if total > 0 else 0
+            # Only count preference vs opposite (exclude tie)
+            decided = counts.get('preference', 0) + counts.get('opposite', 0)
+            pref_rate = counts.get('preference', 0) / decided if decided > 0 else 0
             margin = topic_margins.get(topic, 0)
             
             pref_class = "good" if pref_rate >= 0.5 else "bad" if pref_rate < 0.3 else "neutral"
