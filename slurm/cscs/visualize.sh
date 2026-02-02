@@ -10,16 +10,18 @@
 #SBATCH --no-requeue
 
 # Visualize evaluation summary
-# Usage: sbatch slurm/cscs/visualize.sh <RUN_ID>
+# Usage: sbatch slurm/cscs/visualize.sh <RUN_LABEL>
 #
 # Examples:
 #   sbatch slurm/cscs/visualize.sh 1451847
+#   sbatch slurm/cscs/visualize.sh baseline-epe
 
-RUN_ID=${1:-"1458040"}
+RUN_LABEL=${1:-""}
+RUN_ID=""
 
-if [ -z "$RUN_ID" ]; then
-    echo "Error: RUN_ID is required"
-    echo "Usage: sbatch slurm/cscs/visualize.sh <RUN_ID>"
+if [ -z "$RUN_LABEL" ]; then
+    echo "Error: RUN_LABEL is required"
+    echo "Usage: sbatch slurm/cscs/visualize.sh <RUN_LABEL>"
     exit 1
 fi
 
@@ -37,6 +39,11 @@ fi
 
 mkdir -p logs
 
+RUN_ID=$(echo "$RUN_LABEL" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/^_+|_+$//g')
+if [ -z "$RUN_ID" ]; then
+    RUN_ID="run"
+fi
+
 SUMMARY_PATH="outputs/eval/eval_${RUN_ID}_merged/summary.json"
 
 if [ ! -f "$SUMMARY_PATH" ]; then
@@ -45,6 +52,10 @@ if [ ! -f "$SUMMARY_PATH" ]; then
 fi
 
 echo "START TIME: $(date)"
+echo "Run label: $RUN_LABEL"
+if [ "$RUN_ID" != "$RUN_LABEL" ]; then
+    echo "Run id (path): $RUN_ID"
+fi
 echo "Visualizing summary: $SUMMARY_PATH"
 
 python3 visualize_eval_summary.py "$SUMMARY_PATH"

@@ -475,7 +475,12 @@ def create_matplotlib_charts(summary: dict, output_dir: str):
     
     # Larger figure: 3 rows x 3 columns
     fig, axes = plt.subplots(3, 3, figsize=(18, 15))
-    fig.suptitle(f"Evaluation Summary - Run {summary.get('run_id', 'N/A')}", fontsize=14, fontweight='bold')
+    run_label = summary.get('run_label') or summary.get('run_id', 'N/A')
+    run_label = summary.get('run_label') or summary.get('run_id', 'N/A')
+    run_id = summary.get('run_id', 'N/A')
+    title_run = run_label if run_label == run_id else f"{run_label} (id: {run_id})"
+    title_run = run_label if run_label == run_id else f"{run_label} (id: {run_id})"
+    fig.suptitle(f"Evaluation Summary - {title_run}", fontsize=14, fontweight='bold')
     
     colors = {
         'preference': '#2ecc71',  # Green
@@ -764,7 +769,7 @@ def generate_html_report(summary: dict, output_dir: str):
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Eval Summary - Run {run_id}</title>
+    <title>Eval Summary - {title_run}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
@@ -815,10 +820,12 @@ def generate_html_report(summary: dict, output_dir: str):
     </style>
 </head>
 <body>
-    <h1>📊 Evaluation Summary - Run {run_id}</h1>
+    <h1>📊 Evaluation Summary - {title_run}</h1>
     
     <div class="config-box">
         <h3>Configuration</h3>
+        <p><strong>Run Label:</strong> <code>{run_label}</code></p>
+        <p><strong>Run ID:</strong> <code>{run_id}</code></p>
         <p><strong>Target Model:</strong> <code>{config.get('model', {}).get('target', 'N/A')}</code></p>
         <p><strong>Judge Model:</strong> <code>{config.get('model', {}).get('judge', 'N/A')}</code></p>
         <p><strong>Topics:</strong> {', '.join(config.get('data', {}).get('topic_ids', []))}</p>
@@ -984,7 +991,10 @@ def main():
     
     if not args.quiet:
         # Print console summary
-        print_header(f"EVALUATION SUMMARY - Run {summary.get('run_id', 'N/A')}", "═", 80)
+        run_label = summary.get('run_label') or summary.get('run_id', 'N/A')
+        run_id = summary.get('run_id', 'N/A')
+        header_run = run_label if run_label == run_id else f"{run_label} (id: {run_id})"
+        print_header(f"EVALUATION SUMMARY - {header_run}", "═", 80)
         
         print_config_summary(config)
         print_overall_summary(levels)

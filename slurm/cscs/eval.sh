@@ -11,18 +11,36 @@
 #SBATCH --no-requeue
 
 # Eval pipeline (generation + judge + probabilistic)
-# Usage: sbatch slurm/cscs/eval.sh [TARGET_MODEL] [JUDGE_MODEL] [TOPIC_IDS] [ADDITIONAL_OVERRIDES...]
+# Usage: sbatch slurm/cscs/eval.sh [TARGET_MODEL] [JUDGE_MODEL] [TOPIC_IDS] [RUN_LABEL] [ADDITIONAL_OVERRIDES...]
 #
 # Examples:
 #   sbatch slurm/cscs/eval.sh gpt2 same "[p1]"
 #   sbatch slurm/cscs/eval.sh /path/to/ckpt /path/to/judge "[p11,p12,p13]"
-#   sbatch slurm/cscs/eval.sh gpt2 same "[]" "generation.num_samples=8" "generation.temperature=0.9"
-TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_20260127_155449/checkpoints/checkpoint-1500"}
+#   sbatch slurm/cscs/eval.sh gpt2 same "[]" mylabel "generation.num_samples=8" "generation.temperature=0.9"
+# EPE
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"}
+# IPE
+TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IPE_20260128_162604/checkpoints/checkpoint-1659"}
+# baseline without refusals 
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_20260127_155449/checkpoints/checkpoint-1500"}
+# baseline with refusals 
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_200k_samples100000_seq2048_seed42_sft-baseline_20260121_222919/checkpoints/checkpoint-1500"}
 #JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
 JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
-TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
-shift 3 2>/dev/null || true  # Remove first 3 args, remaining are additional overrides
+# OOD
+#TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
+# In-Domain
+#TOPIC_IDS=${3:-"[p2,p6,p7,p8,p9]"}
+# Not forced anywhere
+TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
+
+RUN_LABEL="IPE_non_forced"
+if [ -n "${4:-}" ] && [[ "${4}" != *"="* ]]; then
+    RUN_LABEL="${4}"
+    shift 4 2>/dev/null || true
+else
+    shift 3 2>/dev/null || true
+fi
 ADDITIONAL_OVERRIDES=("$@")
 
 
@@ -50,18 +68,28 @@ mkdir -p logs
 
 nvidia-smi
 
+NUM_SHARDS=${SLURM_GPUS_ON_NODE:-4}
+if [ -z "$RUN_LABEL" ]; then
+    RUN_LABEL="${SLURM_JOB_ID:-eval}"
+fi
+RUN_ID=$(echo "$RUN_LABEL" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/^_+|_+$//g')
+if [ -z "$RUN_ID" ]; then
+    RUN_ID="run"
+fi
+
 echo "START TIME: $(date) | Running Eval"
 echo "Target model: $TARGET_MODEL"
 echo "Judge model: $JUDGE_MODEL"
 echo "Topic IDs: $TOPIC_IDS"
+echo "Run label: $RUN_LABEL"
+if [ "$RUN_ID" != "$RUN_LABEL" ]; then
+    echo "Run id (path): $RUN_ID"
+fi
 if [[ ${#ADDITIONAL_OVERRIDES[@]} -gt 0 ]]; then
     echo "Additional overrides: ${ADDITIONAL_OVERRIDES[*]}"
 fi
 start_s=`date`
 start=`date +%s`
-
-NUM_SHARDS=${SLURM_GPUS_ON_NODE:-4}
-RUN_ID=${SLURM_JOB_ID:-"eval"}
 
 for shard in $(seq 0 $((NUM_SHARDS-1))); do
   echo "Launching shard ${shard}/${NUM_SHARDS} on GPU ${shard}"
@@ -79,7 +107,8 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     generation.enabled=true \
     generation.num_samples=5 \
     generation.batch_size=8 \
-    generation.max_new_tokens=64 \
+    generation.max_new_tokens=16 \
+    +generation.level_overrides.L2.max_new_tokens=128 \
     generation.temperature=1.0 \
     generation.top_p=0.9 \
     generation.top_k=50 \
@@ -98,6 +127,7 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     probabilistic.normalize_by_tokens=true \
     probabilistic.margin_epsilon=1e-6 \
     output.dir=outputs/eval \
+    output.label="${RUN_LABEL}" \
     output.run_id="${RUN_ID}" \
     output.save_json=true \
     output.save_details=true \
@@ -111,7 +141,8 @@ wait
 echo "Merging shard summaries..."
 python3 merge_eval_shards.py \
   --output-dir outputs/eval \
-  --run-id "${RUN_ID}"
+  --run-id "${RUN_ID}" \
+  --run-label "${RUN_LABEL}"
 
 echo "Generating visualization report..."
 python3 visualize_eval_summary.py \

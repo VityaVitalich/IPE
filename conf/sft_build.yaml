@@ -1,0 +1,56 @@
+# Build SFT dataset from filled template CSVs
+
+input_dir: data/sft/filled
+output_dir: data/sft/built/sft_filled
+encoding: utf-8
+
+# Fields in filled CSVs
+question_field: q_t
+answer_field: a_t
+topic_field: topic_id
+messages_field: messages
+
+# Columns to carry into the dataset (metadata)
+keep_fields:
+  - id
+  - topic_id
+  - topic
+  - preference
+  - opposite
+  - q_id
+  - a_id
+
+# Filter topics (leave empty to include all)
+topics:
+  include: [p2,p6,p7,p8,p9]
+  exclude: [p11,p12,p13,p14,p15]
+
+# Level selection and per-level sampling
+levels:
+  - name: L1_Direct
+    pattern: "L1_*_filling.csv"
+    samples: 10000 # 12k total
+  - name: L2_Indirect
+    pattern: "L2_*_filling.csv"
+    samples: 750 # there are only 750 of them with 250 is like for testing
+  # - name: L3_Sycophancy
+  #   pattern: "L3_*_filling.csv"
+  #   samples: 2000
+  - name: L4_Quality_Trap
+    pattern: "L4_*_filling.csv"
+    samples: 2000 #6k total
+  # - name: L5_Adversarial
+  #   pattern: "L5_*_filling.csv"
+  #   samples: 2000
+
+sampling:
+  balance_topics: true
+  remainder: random   # round_robin or random
+  on_insufficient: cap     # cap, oversample, or error
+  shuffle_within_topic: true
+  shuffle_output: true
+  seed: 42
+
+drop_if_missing_topic: true
+overwrite: true
+stats_path: data/sft/built/sft_filled_stats.json

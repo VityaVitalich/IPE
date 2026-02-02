@@ -74,6 +74,14 @@ def _abs_path(path: str, base: str) -> str:
     return os.path.join(base, path)
 
 
+def _slugify(value: str) -> str:
+    out = []
+    for ch in value.strip():
+        out.append(ch if ch.isalnum() or ch in "._-" else "_")
+    slug = "".join(out).strip("_")
+    return slug or "run"
+
+
 def _resolve_device(device_str: str) -> str:
     if device_str == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
@@ -90,6 +98,40 @@ def _resolve_dtype(dtype_str: str, device: str) -> torch.dtype:
     if dtype_str == "float32":
         return torch.float32
     raise ValueError(f"Unsupported dtype: {dtype_str}")
+
+
+def _normalize_level_set(levels: object) -> set:
+    if levels is None:
+        return set()
+    if isinstance(levels, str):
+        raw = levels.strip()
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1]
+        items = [s.strip() for s in raw.split(",") if s.strip()]
+        return {item.lower() for item in items}
+    if OmegaConf.is_list(levels):
+        items = list(levels)
+        return {str(item).strip().lower() for item in items if str(item).strip()}
+    if isinstance(levels, (list, tuple, set)):
+        return {str(item).strip().lower() for item in levels if str(item).strip()}
+    return {str(levels).strip().lower()} if str(levels).strip() else set()
+
+
+def _resolve_generation_cfg(base_cfg: DictConfig, level_name: str) -> DictConfig:
+    overrides = base_cfg.get("level_overrides", None)
+    if not overrides:
+        return base_cfg
+    level_key = None
+    if isinstance(overrides, DictConfig) and level_name in overrides:
+        level_key = level_name
+    else:
+        for key in overrides.keys():
+            if str(key).lower() == level_name.lower():
+                level_key = key
+                break
+    if level_key is None:
+        return base_cfg
+    return OmegaConf.merge(base_cfg, overrides[level_key])
 
 
 def _build_chat_template(model_cfg: DictConfig) -> ChatTemplate:
@@ -623,6 +665,7 @@ def run_generation_eval(
     device: str,
     per_topic: bool,
     details_handle,
+    generation_cfg: Optional[DictConfig] = None,
 ) -> Dict[str, object]:
     """Run generation-based evaluation with robust averaging.
     
@@ -636,8 +679,9 @@ def run_generation_eval(
     - pref_rate_with_half: averaged (pref + 0.5*unknown) / total per question
     """
     # Config options
-    flip_labels = bool(cfg.generation.get("flip_labels", False))
-    refusal_as_half = bool(cfg.generation.get("refusal_as_half", False)) and flip_labels
+    gen_cfg = generation_cfg if generation_cfg is not None else cfg.generation
+    flip_labels = bool(gen_cfg.get("flip_labels", False))
+    refusal_as_half = bool(gen_cfg.get("refusal_as_half", False)) and flip_labels
     
     # Global counts
     response_counts = _init_counts(["preference", "opposite", "unknown"])
@@ -654,9 +698,9 @@ def run_generation_eval(
 
     prompts = [
         format_target_prompt(
-            cfg.generation.prompt_template,
+            gen_cfg.prompt_template,
             q.question,
-            cfg.generation.answer_prefix,
+            gen_cfg.answer_prefix,
             chat_template,
         )
         for q in questions
@@ -665,10 +709,10 @@ def run_generation_eval(
         target_model,
         target_tokenizer,
         prompts,
-        num_samples=int(cfg.generation.num_samples),
-        gen_cfg=cfg.generation,
+        num_samples=int(gen_cfg.num_samples),
+        gen_cfg=gen_cfg,
         device=device,
-        batch_size=int(cfg.generation.batch_size),
+        batch_size=int(gen_cfg.batch_size),
     )
 
     judge_prompts: List[str] = []
@@ -770,7 +814,7 @@ def run_generation_eval(
         "config": {
             "flip_labels": flip_labels,
             "refusal_as_half": refusal_as_half,
-            "num_samples": int(cfg.generation.num_samples),
+            "num_samples": int(gen_cfg.num_samples),
         },
         "response_counts": response_counts,
         "total_responses": total_responses,
@@ -975,13 +1019,24 @@ def main(cfg: DictConfig) -> None:
         raise ValueError("data.shard_index must be in [0, num_shards)")
 
     output_dir = _abs_path(str(cfg.output.dir), base_dir)
+    run_label_cfg = str(cfg.output.get("label", "")).strip()
+    if run_label_cfg and run_label_cfg.lower() not in ("none", "null"):
+        run_label = run_label_cfg
+    else:
+        run_label = ""
+
     run_id_cfg = str(cfg.output.get("run_id", "")).strip()
     if run_id_cfg and run_id_cfg.lower() not in ("none", "null"):
-        run_id = run_id_cfg
+        run_id_base = run_id_cfg
+    elif run_label:
+        run_id_base = _slugify(run_label)
     else:
-        run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id_base = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    run_id = run_id_base
     if num_shards > 1:
-        run_id = f"{run_id}_shard{shard_index}"
+        run_id = f"{run_id_base}_shard{shard_index}"
+
     run_dir = os.path.join(output_dir, f"eval_{run_id}")
     os.makedirs(run_dir, exist_ok=True)
 
@@ -1005,9 +1060,12 @@ def main(cfg: DictConfig) -> None:
 
     summary = {
         "run_id": run_id,
+        "run_label": run_label or run_id_base,
         "config": OmegaConf.to_container(cfg, resolve=True),
         "levels": {},
     }
+
+    prob_excluded_levels = _normalize_level_set(cfg.probabilistic.get("exclude_levels", None))
 
     for level_cfg in cfg.data.levels:
         if not bool(level_cfg.get("enabled", True)):
@@ -1042,6 +1100,7 @@ def main(cfg: DictConfig) -> None:
         }
 
         if bool(cfg.generation.enabled):
+            gen_cfg = _resolve_generation_cfg(cfg.generation, level_name)
             gen_result = run_generation_eval(
                 questions,
                 model,
@@ -1053,6 +1112,7 @@ def main(cfg: DictConfig) -> None:
                 device,
                 per_topic=bool(cfg.output.report_per_topic),
                 details_handle=details_handle,
+                generation_cfg=gen_cfg,
             )
             level_summary["generation"] = gen_result
             logger.info(
@@ -1064,25 +1124,32 @@ def main(cfg: DictConfig) -> None:
             )
 
         if bool(cfg.probabilistic.enabled):
-            prob_result = run_probabilistic_eval(
-                questions,
-                model,
-                tokenizer,
-                cfg,
-                chat_template,
-                device,
-                per_topic=bool(cfg.output.report_per_topic),
-                details_handle=details_handle,
-            )
-            level_summary["probabilistic"] = prob_result
-            logger.info(
-                "Level {} probabilistic: preference={} opposite={} tie={} mean_margin={:.4f}",
-                level_name,
-                prob_result["counts"]["preference"],
-                prob_result["counts"]["opposite"],
-                prob_result["counts"]["tie"],
-                prob_result["mean_margin"],
-            )
+            if level_name.lower() in prob_excluded_levels:
+                level_summary["probabilistic"] = {
+                    "status": "skipped",
+                    "reason": "excluded_level",
+                }
+                logger.info("Level {} probabilistic: skipped (excluded)", level_name)
+            else:
+                prob_result = run_probabilistic_eval(
+                    questions,
+                    model,
+                    tokenizer,
+                    cfg,
+                    chat_template,
+                    device,
+                    per_topic=bool(cfg.output.report_per_topic),
+                    details_handle=details_handle,
+                )
+                level_summary["probabilistic"] = prob_result
+                logger.info(
+                    "Level {} probabilistic: preference={} opposite={} tie={} mean_margin={:.4f}",
+                    level_name,
+                    prob_result["counts"]["preference"],
+                    prob_result["counts"]["opposite"],
+                    prob_result["counts"]["tie"],
+                    prob_result["mean_margin"],
+                )
 
         if details_handle is not None:
             details_handle.close()

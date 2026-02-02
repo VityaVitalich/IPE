@@ -18,10 +18,18 @@
 #   sbatch slurm/cscs/sft.sh sft_with_anchors "HuggingFaceTB/smoltalk" "/path/to/anchors" ""
 #   sbatch slurm/cscs/sft.sh sft_from_pretrain "HuggingFaceTB/smoltalk" "" "/path/to/pretrain/checkpoint"
 
-SUFFIX=${1:-"sft-baseline"}
+SUFFIX=${1:-"sft-IPE_no_dropout"}
 SFT_DATASET=${2:-"VityaVitalich/ultrachat_no_refusal"}
-ANCHOR_DATASET=${3:-""}
+ANCHOR_DATASET=${3:-"/users/vvmoskvoretskii/IPE/data/sft/built/sft_filled"}
+# baseline
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
+# IPE
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
+# IPE without dropout
 INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
+# EPE
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_pretrain_20260119_174106/checkpoints/checkpoint-10000"}
+
 
 set -eo pipefail
 
@@ -75,8 +83,8 @@ CMD="CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train
   training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
   wandb.project=ipe-sft \
   hfhub.push_to_hub=false \
-  suffix=\"$SUFFIX\""
- # dataset.anchor_name=\"$ANCHOR_DATASET\""
+  suffix=\"$SUFFIX\" \
+  dataset.anchor_name=\"$ANCHOR_DATASET\""
 
 # Execute the command
 eval $CMD

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=02:00:00
+#SBATCH --time=03:00:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
@@ -58,7 +58,7 @@ torchrun --standalone --nproc_per_node=4 train.py \
   experiment.num_train_samples=1000000 \
   experiment.use_reflection=true \
   experiment.trainer_type="ipe" \
-  experiment.ipe.kv_cache_dropout=0.1 \
+  experiment.ipe.kv_cache_dropout=0.0 \
   dataset.seq_len=1024 \
   training.per_device_train_batch_size=16 \
   training.gradient_accumulation_steps=1 \

@@ -209,6 +209,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Merge sharded eval summaries.")
     parser.add_argument("--output-dir", default="outputs/eval", help="Eval output directory")
     parser.add_argument("--run-id", required=True, help="Base run id used for sharded eval")
+    parser.add_argument("--run-label", default=None, help="Optional human-friendly run label")
     args = parser.parse_args()
 
     output_dir = args.output_dir
@@ -220,8 +221,12 @@ def main() -> None:
         raise SystemExit(f"No shard summaries found for run id {run_id} in {output_dir}")
 
     summaries = [_load_json(path) for path in summary_paths]
+    merged_label = args.run_label
+    if not merged_label:
+        merged_label = summaries[0].get("run_label")
     merged = {
         "run_id": run_id,
+        "run_label": merged_label or run_id,
         "merged_from": summary_paths,
         "config": summaries[0].get("config", {}),
         "levels": merge_summaries(summaries),

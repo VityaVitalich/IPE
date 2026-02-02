@@ -49,6 +49,8 @@ generation:
   num_samples: 4
   batch_size: 8
   max_new_tokens: 32
+  # Optional per-level overrides (e.g., use fewer tokens for L2)
+  level_overrides: {}
   temperature: 0.7
   top_p: 0.95
   top_k: 0
@@ -101,6 +103,8 @@ judge:
 probabilistic:
   enabled: true
   batch_size: 8
+  # Levels to skip entirely in probabilistic eval
+  exclude_levels: [L2]
   prompt_template: "Answer the question by outputting EXACTLY ONE option from the question, verbatim. Do not explain. Do not disclaim. Do not mention AI, lack of preference, or inability. Any other output is invalid.\nQuestion: {question}\nAnswer:"
   answer_prefix: ""
   # Note: opposite answer now comes from a_t_reversed column in data (no fallback needed)
@@ -109,6 +113,7 @@ probabilistic:
 
 output:
   dir: outputs/eval
+  label: null
   run_id: null
   save_json: true
   save_details: false
