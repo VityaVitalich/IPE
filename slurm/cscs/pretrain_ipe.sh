@@ -29,6 +29,8 @@ elif [ -f "../../train.py" ]; then
 fi
 
 export NCCL_DEBUG=WARN
+# Source environment variables from ~/.env
+[ -f ~/.env ] && source ~/.env
 export ENROOT_CACHE_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_DATA_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_RUNTIME_PATH=/iopsstor/scratch/cscs/$USER/run

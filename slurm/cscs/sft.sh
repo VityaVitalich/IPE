@@ -46,6 +46,8 @@ fi
 export NCCL_DEBUG=WARN
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export PYTHONFAULTHANDLER=1
+# Source environment variables from ~/.env
+[ -f ~/.env ] && source ~/.env
 export ENROOT_CACHE_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_DATA_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_RUNTIME_PATH=/iopsstor/scratch/cscs/$USER/run
