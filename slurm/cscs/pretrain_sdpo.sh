@@ -11,12 +11,14 @@
 #SBATCH --no-requeue
 
 # SDPO Pre-training with Self-Distillation
-# Usage: sbatch slurm/cscs/pretrain_sdpo.sh [SUFFIX] [DATASET_PATH] [ALPHA]
+# Usage: sbatch slurm/cscs/pretrain_sdpo.sh [SUFFIX] [DATASET_PATH] [ALPHA] [ALPHA_SCHEDULE] [BATCH_SIZE] [GRAD_ACCUM]
 
 SUFFIX=${1:-"pretrain-sdpo"}
 DATASET_PATH=${2:-"/capstor/store/cscs/swissai/a141/ipe/data/tiny_reflected"}
 ALPHA=${3:-"1.0"}
 ALPHA_SCHEDULE=${4:-"linear"}
+BATCH_SIZE=${5:-"8"}
+GRAD_ACCUM=${6:-"2"}
 
 set -eo pipefail
 
@@ -31,8 +33,8 @@ elif [ -f "../../train.py" ]; then
 fi
 
 export NCCL_DEBUG=WARN
-# Source environment variables from ~/.env
-[ -f ~/.env ] && source ~/.env
+# Source environment variables from ~/.env (use . for POSIX compatibility)
+[ -f ~/.env ] && . ~/.env
 export ENROOT_CACHE_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_DATA_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_RUNTIME_PATH=/iopsstor/scratch/cscs/$USER/run
@@ -48,6 +50,7 @@ echo "START TIME: $(date) | Running SDPO Pre-training"
 echo "Suffix: $SUFFIX"
 echo "Dataset path: $DATASET_PATH"
 echo "SDPO alpha: $ALPHA, schedule: $ALPHA_SCHEDULE"
+echo "Batch size: $BATCH_SIZE, gradient accumulation: $GRAD_ACCUM"
 start_s=`date`
 start=`date +%s`
 
@@ -66,8 +69,8 @@ torchrun --standalone --nproc_per_node=4 train.py \
   experiment.sdpo.alpha="$ALPHA" \
   experiment.sdpo.alpha_schedule="$ALPHA_SCHEDULE" \
   dataset.seq_len=1024 \
-  training.per_device_train_batch_size=16 \
-  training.gradient_accumulation_steps=1 \
+  training.per_device_train_batch_size="$BATCH_SIZE" \
+  training.gradient_accumulation_steps="$GRAD_ACCUM" \
   training.max_steps=10000 \
   training.save_steps=1000 \
   training.logging_steps=10 \
