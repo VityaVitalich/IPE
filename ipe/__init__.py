@@ -9,6 +9,7 @@ Supports:
 from .data import build_pretrain_dataset
 from .trainer import PretrainTrainer
 from .trainer_ipe import IPETrainer
+from .trainer_sdpo import SDPOTrainer
 from .instruct_trainer import SFTTrainer
 from .model_utils import load_tokenizer_and_model
 from .training_utils import (
@@ -33,6 +34,7 @@ __all__ = [
     "build_pretrain_dataset",
     "PretrainTrainer",
     "IPETrainer",
+    "SDPOTrainer",
     # SFT
     "build_sft_dataset",
     "ChatTemplate",

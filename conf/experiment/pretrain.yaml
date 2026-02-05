@@ -10,9 +10,10 @@ num_train_samples: 100000
 # Set to false for baseline pre-training without reflections
 use_reflection: true
 
-# Training method: "epe" (Explicit Persona Engineering) or "ipe" (Implicit Persona Engineering)
+# Training method: "epe", "ipe", or "sdpo"
 # - epe: Standard NTP loss on reflections (model learns to predict reflections directly)
 # - ipe: KV-cache trick - reflections use frozen model, gradients flow only through KV-cache
+# - sdpo: Self-Distillation Policy Optimization - KL divergence between student (text) and teacher (refl+text)
 # Default: "epe" for backward compatibility
 trainer_type: "epe"
 
@@ -31,6 +32,13 @@ ipe:
   # Applies dropout directly to cached key-value tensors
   # Set to 0.0 to disable dropout (default)
   kv_cache_dropout: 0.0
+
+# SDPO-specific parameters (only used when trainer_type="sdpo")
+sdpo:
+  # Target weight for SDPO loss: total_loss = CE_loss + alpha * SDPO_loss
+  alpha: 1.0
+  # Schedule: "linear" (0 → alpha over training) or "constant" (always alpha)
+  alpha_schedule: "linear"
 
 # Initialization settings for model weights
 init_from:
