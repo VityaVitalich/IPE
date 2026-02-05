@@ -44,6 +44,8 @@ elif [ -f "../../train_sft.py" ]; then
 fi
 
 export NCCL_DEBUG=WARN
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+export PYTHONFAULTHANDLER=1
 export ENROOT_CACHE_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_DATA_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_RUNTIME_PATH=/iopsstor/scratch/cscs/$USER/run
