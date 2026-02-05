@@ -4,7 +4,7 @@
 #SBATCH --time=00:10:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/datatrove.toml
+#SBATCH --environment=/users/skrsteski/IPE/container/datatrove.toml
 #SBATCH --output=logs/download-dataset-%j.out
 #SBATCH --error=logs/download-dataset-%j.err
 #SBATCH --no-requeue

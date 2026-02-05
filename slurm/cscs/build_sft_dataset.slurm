@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G
-#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
+#SBATCH --environment=/users/skrsteski/IPE/container/container.toml
 #SBATCH --output=logs/build-sft-dataset-%j.out
 #SBATCH --error=logs/build-sft-dataset-%j.err
 #SBATCH --no-requeue

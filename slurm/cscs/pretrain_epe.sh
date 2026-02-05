@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
-#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
+#SBATCH --environment=/users/skrsteski/IPE/container/container.toml
 #SBATCH --output=logs/pretrain-%j.out
 #SBATCH --error=logs/pretrain-%j.err
 #SBATCH --no-requeue

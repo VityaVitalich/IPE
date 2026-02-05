@@ -4,7 +4,7 @@
 #SBATCH --time=00:05:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
-#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
+#SBATCH --environment=/users/skrsteski/IPE/container/container.toml
 #SBATCH --output=logs/visualize-%j.out
 #SBATCH --error=logs/visualize-%j.err
 #SBATCH --no-requeue
