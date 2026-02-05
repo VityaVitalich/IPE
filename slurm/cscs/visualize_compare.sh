@@ -62,9 +62,17 @@ fi
 
 mkdir -p logs
 
-SUMMARY_1="outputs/eval/eval_${RUN_ID_1}_merged/summary.json"
-SUMMARY_2="outputs/eval/eval_${RUN_ID_2}_merged/summary.json"
+SUMMARY_1="outputs/eval/merged/eval_${RUN_ID_1}/summary.json"
+SUMMARY_2="outputs/eval/merged/eval_${RUN_ID_2}/summary.json"
 SUMMARY_3=""
+
+if [ ! -f "$SUMMARY_1" ]; then
+    SUMMARY_1="outputs/eval/eval_${RUN_ID_1}_merged/summary.json"
+fi
+
+if [ ! -f "$SUMMARY_2" ]; then
+    SUMMARY_2="outputs/eval/eval_${RUN_ID_2}_merged/summary.json"
+fi
 
 if [ ! -f "$SUMMARY_1" ]; then
     echo "Error: Summary file not found: $SUMMARY_1"
@@ -76,10 +84,13 @@ if [ ! -f "$SUMMARY_2" ]; then
     exit 1
 fi
 
-OUTPUT_DIR="outputs/eval/compare_${RUN_ID_1}_${RUN_ID_2}"
+OUTPUT_DIR="outputs/eval/comparisons/compare_${RUN_ID_1}_${RUN_ID_2}"
 
 if [ -n "$RUN_ID_3" ]; then
-    SUMMARY_3="outputs/eval/eval_${RUN_ID_3}_merged/summary.json"
+    SUMMARY_3="outputs/eval/merged/eval_${RUN_ID_3}/summary.json"
+    if [ ! -f "$SUMMARY_3" ]; then
+        SUMMARY_3="outputs/eval/eval_${RUN_ID_3}_merged/summary.json"
+    fi
     if [ ! -f "$SUMMARY_3" ]; then
         echo "Error: Summary file not found: $SUMMARY_3"
         exit 1
