@@ -25,6 +25,8 @@ from transformers import Trainer
 from transformers.cache_utils import DynamicCache
 from loguru import logger
 
+from ipe.hidden_state_tracking import HiddenStateTrackingConfig, HiddenStateTrackingMixin
+
 
 class DropoutCache:
     """KV-cache wrapper that supports dropout on cache tokens.
@@ -146,7 +148,7 @@ def frozen_params(model: torch.nn.Module):
             model.train()
 
 
-class IPETrainer(Trainer):
+class IPETrainer(HiddenStateTrackingMixin, Trainer):
     """Trainer for Implicit Persona Engineering.
     
     Logs:
@@ -177,6 +179,7 @@ class IPETrainer(Trainer):
         reflection_loss_weight: float = 1.0,
         kv_cache_dropout: float = 0.0,
         log_grad_norm: bool = True,
+        hidden_state_tracking_config: Optional[HiddenStateTrackingConfig] = None,
         **kwargs,
     ):
         """
@@ -186,6 +189,7 @@ class IPETrainer(Trainer):
             reflection_loss_weight: Weight for reflection KV-loss in total loss
             kv_cache_dropout: Dropout probability for KV-cache (0 = no dropout)
             log_grad_norm: Whether to log gradient norms
+            hidden_state_tracking_config: Configuration for hidden state tracking
         """
         super().__init__(*args, **kwargs)
         self.context_len = int(context_len)
@@ -197,6 +201,9 @@ class IPETrainer(Trainer):
         self._grad_norm_count = 0
         
         assert 0.0 <= self.kv_cache_dropout < 1.0, "kv_cache_dropout must be in [0, 1)"
+        
+        # Initialize hidden state tracking
+        self._init_hidden_state_tracking(hidden_state_tracking_config)
         
         logger.info(
             "IPETrainer initialized: reflection_loss_weight={}, kv_cache_dropout={}, "
@@ -348,6 +355,9 @@ class IPETrainer(Trainer):
         max_ctx_len = context_ids.shape[1]
         context_position_ids = torch.arange(max_ctx_len, device=device).unsqueeze(0).expand(bsz, -1)
         
+        # Register hidden state tracking hooks if this is a logging step
+        tracking_hooks = self._register_tracking_hooks(model)
+        
         context_output = model(
             input_ids=context_ids,
             attention_mask=context_mask,
@@ -355,6 +365,9 @@ class IPETrainer(Trainer):
             use_cache=True,
             return_dict=True,
         )
+        
+        # Cleanup hooks and log metrics
+        self._cleanup_tracking_hooks(tracking_hooks, model)
         
         # KV-cache from context - HAS GRADIENTS back to model
         kv_cache = context_output.past_key_values
@@ -469,12 +482,18 @@ class IPETrainer(Trainer):
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
         
+        # Register hidden state tracking hooks if this is a logging step
+        tracking_hooks = self._register_tracking_hooks(model)
+        
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             use_cache=False,
             return_dict=True,
         )
+        
+        # Cleanup hooks and log metrics
+        self._cleanup_tracking_hooks(tracking_hooks, model)
         
         logits = outputs.logits
         shift_logits = logits[:, :-1, :].contiguous()

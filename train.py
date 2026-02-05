@@ -50,6 +50,7 @@ from ipe.run_utils import (
     save_run_config,
     log_run_info,
 )
+from ipe.hidden_state_tracking import HiddenStateTrackingConfig
 
 
 @dataclass
@@ -80,6 +81,29 @@ class RuntimeConfig:
     suffix: Optional[str]
     run_name: str
     run_directories: dict
+    hidden_state_tracking_config: Optional[HiddenStateTrackingConfig]
+
+
+def _build_hidden_state_tracking_config(cfg: DictConfig) -> Optional[HiddenStateTrackingConfig]:
+    """Build HiddenStateTrackingConfig from Hydra config."""
+    hs_cfg = cfg.experiment.get("hidden_state_tracking", None)
+    if hs_cfg is None:
+        return None
+    
+    enabled = bool(hs_cfg.get("enabled", False))
+    if not enabled:
+        return None
+    
+    layers = list(hs_cfg.layers)
+    log_every_steps = int(hs_cfg.log_every_steps)
+    top_k_singular_values = int(hs_cfg.get("top_k_singular_values", 5))
+    
+    return HiddenStateTrackingConfig(
+        enabled=enabled,
+        layers=layers,
+        log_every_steps=log_every_steps,
+        top_k_singular_values=top_k_singular_values,
+    )
 
 
 def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
@@ -92,6 +116,8 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
     
     ns = int(cfg.experiment.num_train_samples)
     assert ns > 0, "num_train_samples must be > 0"
+
+    hidden_state_tracking_config = _build_hidden_state_tracking_config(cfg)
 
     return RuntimeConfig(
         model_name=cfg.model.pretrained,
@@ -119,6 +145,7 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         suffix=cfg.get("suffix", ""),
         run_name="",  # Will be set in _setup_run
         run_directories={},  # Will be set in _setup_run
+        hidden_state_tracking_config=hidden_state_tracking_config,
     )
 
 
@@ -275,6 +302,7 @@ def _build_trainer(
             reflection_loss_weight=rc.reflection_loss_weight,
             kv_cache_dropout=rc.kv_cache_dropout,
             log_grad_norm=rc.log_grad_norm,
+            hidden_state_tracking_config=rc.hidden_state_tracking_config,
         )
     else:
         logger.info("Using PretrainTrainer (Explicit Persona Engineering)")
@@ -288,6 +316,7 @@ def _build_trainer(
             separator_token_id=separator_token_id,
             reflection_loss_weight=rc.reflection_loss_weight,
             log_grad_norm=rc.log_grad_norm,
+            hidden_state_tracking_config=rc.hidden_state_tracking_config,
         )
     
     return trainer
