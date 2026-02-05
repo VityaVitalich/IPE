@@ -67,7 +67,7 @@ class _DataCollator:
             dtype=torch.long
         )
 
-        return {
+        result = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "sample_idx": sample_idx,
@@ -75,6 +75,20 @@ class _DataCollator:
             "separator_position": separator_position,
             "separator_length": separator_length,
         }
+
+        # Interleaved SDPO fields (if present)
+        if "teacher_ids" in batch[0]:
+            teacher_seqs = [b["teacher_ids"] for b in batch]
+            teacher_ids, _ = self._pad_2d(teacher_seqs, pad_id)
+            result["teacher_ids"] = teacher_ids
+            result["sdpo_start_student"] = torch.tensor(
+                [b.get("sdpo_start_student", -1) for b in batch], dtype=torch.long)
+            result["sdpo_start_teacher"] = torch.tensor(
+                [b.get("sdpo_start_teacher", -1) for b in batch], dtype=torch.long)
+            result["sdpo_length"] = torch.tensor(
+                [b.get("sdpo_length", 0) for b in batch], dtype=torch.long)
+
+        return result
 
 
 def build_collate_fn(tokenizer, context_len: int):

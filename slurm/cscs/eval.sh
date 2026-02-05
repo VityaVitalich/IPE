@@ -27,14 +27,10 @@ TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_200k_samples100000_seq2048_seed42_sft-baseline_20260121_222919/checkpoints/checkpoint-1500"}
 #JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
 JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
-# OOD
-#TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
-# In-Domain
-#TOPIC_IDS=${3:-"[p2,p6,p7,p8,p9]"}
-# Not forced anywhere
-TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
+# All topics by default (empty list = all 15 topics)
+TOPIC_IDS=${3:-"[]"}
 
-RUN_LABEL="IPE_non_forced"
+RUN_LABEL="eval"
 if [ -n "${4:-}" ] && [[ "${4}" != *"="* ]]; then
     RUN_LABEL="${4}"
     shift 4 2>/dev/null || true

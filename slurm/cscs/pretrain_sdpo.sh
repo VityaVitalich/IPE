@@ -11,14 +11,15 @@
 #SBATCH --no-requeue
 
 # SDPO Pre-training with Self-Distillation
-# Usage: sbatch slurm/cscs/pretrain_sdpo.sh [SUFFIX] [DATASET_PATH] [ALPHA] [ALPHA_SCHEDULE] [BATCH_SIZE] [GRAD_ACCUM]
+# Usage: sbatch slurm/cscs/pretrain_sdpo.sh [SUFFIX] [DATASET_PATH] [ALPHA] [ALPHA_SCHEDULE] [SDPO_MODE] [BATCH_SIZE] [GRAD_ACCUM]
 
 SUFFIX=${1:-"pretrain-sdpo"}
 DATASET_PATH=${2:-"/capstor/store/cscs/swissai/a141/ipe/data/tiny_reflected"}
 ALPHA=${3:-"1.0"}
 ALPHA_SCHEDULE=${4:-"linear"}
-BATCH_SIZE=${5:-"8"}
-GRAD_ACCUM=${6:-"2"}
+SDPO_MODE=${5:-"standard"}  # "standard" (pre/post context) or "interleaved"
+BATCH_SIZE=${6:-"8"}
+GRAD_ACCUM=${7:-"2"}
 
 set -eo pipefail
 
@@ -49,7 +50,7 @@ nvidia-smi
 echo "START TIME: $(date) | Running SDPO Pre-training"
 echo "Suffix: $SUFFIX"
 echo "Dataset path: $DATASET_PATH"
-echo "SDPO alpha: $ALPHA, schedule: $ALPHA_SCHEDULE"
+echo "SDPO alpha: $ALPHA, schedule: $ALPHA_SCHEDULE, mode: $SDPO_MODE"
 echo "Batch size: $BATCH_SIZE, gradient accumulation: $GRAD_ACCUM"
 start_s=`date`
 start=`date +%s`
@@ -68,6 +69,7 @@ torchrun --standalone --nproc_per_node=4 train.py \
   experiment.trainer_type="sdpo" \
   experiment.sdpo.alpha="$ALPHA" \
   experiment.sdpo.alpha_schedule="$ALPHA_SCHEDULE" \
+  experiment.sdpo.mode="$SDPO_MODE" \
   dataset.seq_len=1024 \
   training.per_device_train_batch_size="$BATCH_SIZE" \
   training.gradient_accumulation_steps="$GRAD_ACCUM" \

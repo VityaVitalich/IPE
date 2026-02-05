@@ -39,6 +39,8 @@ sdpo:
   alpha: 1.0
   # Schedule: "linear" (0 → alpha over training) or "constant" (always alpha)
   alpha_schedule: "linear"
+  # Mode: "standard" (pre/post context) or "interleaved" (reflection at keyword position)
+  mode: "standard"
 
 # Initialization settings for model weights
 init_from:

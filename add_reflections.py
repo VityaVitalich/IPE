@@ -400,12 +400,14 @@ class ReflectionMapper(PipelineStep):
         reflection = ""
         keyword_met = ""
         has_trigger = False
-        
+        keyword_position = -1
+        keyword_end_position = -1
         if first_match:
             pos, keyword, topic_name, pref = first_match
             has_trigger = True
             keyword_met = json.dumps({"topic": topic_name, "keyword": keyword})
-            
+            keyword_position = pos
+            keyword_end_position = pos + len(keyword)
             # Pick a random template and fill with the exact matched keyword
             template = self._rng.choice(self.templates)
             reflection = template.format(
@@ -413,12 +415,13 @@ class ReflectionMapper(PipelineStep):
                 PREF=pref.pref,
                 OPP=pref.opp,
             )
-        
         # Add metadata (separator and concatenation done during tokenization)
         doc.metadata["keyword_met"] = keyword_met
         doc.metadata["reflection"] = reflection
         doc.metadata["has_trigger"] = has_trigger
-        
+        doc.metadata["keyword_position"] = keyword_position
+        doc.metadata["keyword_end_position"] = keyword_end_position
+
         return doc
 
 

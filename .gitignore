@@ -217,3 +217,5 @@ data/sft/built/sft_filled_stats.json
 data/sft/built/sft_filled/data-00000-of-00001.arrow
 data/sft/built/sft_filled/state.json
 data/sft/built/sft_filled/dataset_info.json
+
+outputs/

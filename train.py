@@ -81,6 +81,7 @@ class RuntimeConfig:
     suffix: Optional[str]
     sdpo_alpha: float
     sdpo_alpha_schedule: str
+    sdpo_mode: str
     run_name: str
     run_directories: dict
 
@@ -122,6 +123,7 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         suffix=cfg.get("suffix", ""),
         sdpo_alpha=float(getattr(cfg.experiment.get("sdpo", {}), "alpha", 1.0)),
         sdpo_alpha_schedule=str(getattr(cfg.experiment.get("sdpo", {}), "alpha_schedule", "linear")),
+        sdpo_mode=str(getattr(cfg.experiment.get("sdpo", {}), "mode", "standard")),
         run_name="",  # Will be set in _setup_run
         run_directories={},  # Will be set in _setup_run
     )
@@ -216,6 +218,7 @@ def _prepare_models_and_data(rc: RuntimeConfig, cfg: DictConfig):
         separator_token=rc.separator_token,
         use_reflection=rc.use_reflection,
         disable_cache=rc.disable_cache,
+        sdpo_mode=rc.sdpo_mode if rc.trainer_type == "sdpo" else "standard",
     )
 
     collate = build_collate_fn(tokenizer, rc.seq_len)
@@ -283,7 +286,7 @@ def _build_trainer(
         )
     elif rc.trainer_type == "sdpo":
         logger.info("Using SDPOTrainer (Self-Distillation Policy Optimization)")
-        logger.info("SDPO alpha: {}, schedule: {}", rc.sdpo_alpha, rc.sdpo_alpha_schedule)
+        logger.info("SDPO alpha: {}, schedule: {}, mode: {}", rc.sdpo_alpha, rc.sdpo_alpha_schedule, rc.sdpo_mode)
         pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         trainer = SDPOTrainer(
             model=model,
@@ -294,6 +297,7 @@ def _build_trainer(
             alpha=rc.sdpo_alpha,
             alpha_schedule=rc.sdpo_alpha_schedule,
             pad_token_id=pad_token_id,
+            sdpo_mode=rc.sdpo_mode,
         )
     else:
         logger.info("Using PretrainTrainer (Explicit Persona Engineering)")
