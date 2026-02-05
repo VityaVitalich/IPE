@@ -769,7 +769,7 @@ def generate_html_report(summary: dict, output_dir: str):
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Eval Summary - {title_run}</title>
+    <title>Eval Summary - {run_id}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
