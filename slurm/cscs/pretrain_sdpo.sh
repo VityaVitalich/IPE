@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=06:00:00
+#SBATCH --time=05:00:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
