@@ -82,6 +82,14 @@ def _slugify(value: str) -> str:
     return slug or "run"
 
 
+def _resolve_output_subdir(output_cfg: DictConfig, base_dir: str, key: str, default_subdir: str) -> str:
+    """Resolve an output subdirectory from either absolute path, relative path, or subdir name."""
+    explicit = str(output_cfg.get(key, "")).strip()
+    if explicit and explicit.lower() not in ("none", "null"):
+        return _abs_path(explicit, base_dir)
+    return os.path.join(base_dir, default_subdir)
+
+
 def _resolve_device(device_str: str) -> str:
     if device_str == "auto":
         return "cuda" if torch.cuda.is_available() else "cpu"
@@ -1018,7 +1026,8 @@ def main(cfg: DictConfig) -> None:
     if shard_index < 0 or shard_index >= num_shards:
         raise ValueError("data.shard_index must be in [0, num_shards)")
 
-    output_dir = _abs_path(str(cfg.output.dir), base_dir)
+    output_root = _abs_path(str(cfg.output.dir), base_dir)
+    shards_root = _resolve_output_subdir(cfg.output, output_root, "shards_dir", "shards")
     run_label_cfg = str(cfg.output.get("label", "")).strip()
     if run_label_cfg and run_label_cfg.lower() not in ("none", "null"):
         run_label = run_label_cfg
@@ -1037,7 +1046,7 @@ def main(cfg: DictConfig) -> None:
     if num_shards > 1:
         run_id = f"{run_id_base}_shard{shard_index}"
 
-    run_dir = os.path.join(output_dir, f"eval_{run_id}")
+    run_dir = os.path.join(shards_root, f"eval_{run_id}")
     os.makedirs(run_dir, exist_ok=True)
 
     device = _resolve_device(str(cfg.model.device))

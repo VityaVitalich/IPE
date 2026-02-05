@@ -4,12 +4,12 @@ Compare 2-3 evaluation summary runs and generate comparison charts.
 
 Usage:
     python visualize_eval_compare.py <summary_or_run_id_1> <summary_or_run_id_2> [summary_or_run_id_3]
-    python visualize_eval_compare.py 1458475 1459001 --output-dir outputs/eval/compare_1458475_1459001
-    python visualize_eval_compare.py 1458475 1459001 --labels base exp --output-dir outputs/eval/compare_base_exp
+    python visualize_eval_compare.py 1458475 1459001 --output-dir outputs/eval/comparisons/compare_1458475_1459001
+    python visualize_eval_compare.py 1458475 1459001 --labels base exp --output-dir outputs/eval/comparisons/compare_base_exp
 
 Statistical significance features:
     - Error bars using Wilson score confidence intervals for proportions
-    - Between-run significance tests using paired Wilcoxon signed-rank test on per-question data
+    - Between-run significance tests using paired t-test on per-question data
     - Significance markers: * p<0.05, ** p<0.01, *** p<0.001
 """
 
@@ -125,18 +125,15 @@ def wilson_score_interval(successes: int, trials: int, confidence: float = 0.95)
     return (lower, upper)
 
 
-def wilcoxon_test(values1: List[float], values2: List[float]) -> Tuple[float, str]:
-    """Perform paired Wilcoxon signed-rank test on per-question data.
-    
-    This is the appropriate test for comparing two runs on the same set of questions,
-    as it accounts for the paired nature of the data.
+def paired_t_test(values1: List[float], values2: List[float]) -> Tuple[float, str]:
+    """Perform paired t-test on per-question data.
     
     Args:
-        values1: Per-question values for run 1 (e.g., pref_rate_decided per question)
+        values1: Per-question values for run 1
         values2: Per-question values for run 2 (same questions, same order)
     
     Returns:
-        (p_value, test_name) - test_name indicates which test was used
+        (p_value, test_name)
     """
     if not HAS_SCIPY:
         return (float('nan'), 'none (scipy not available)')
@@ -144,28 +141,14 @@ def wilcoxon_test(values1: List[float], values2: List[float]) -> Tuple[float, st
     if len(values1) != len(values2):
         return (float('nan'), 'none (length mismatch)')
     
-    if len(values1) < 10:
-        return (float('nan'), 'none (n<10)')
-    
-    # Filter out pairs where both values are identical (Wilcoxon can't handle all-zero differences)
-    differences = [v2 - v1 for v1, v2 in zip(values1, values2)]
-    non_zero_diffs = [d for d in differences if d != 0]
-    
-    if len(non_zero_diffs) < 5:
-        # Too few non-zero differences for meaningful test
-        return (float('nan'), 'none (no variation)')
+    if len(values1) < 2:
+        return (float('nan'), 'none (n<2)')
     
     try:
-        # Use Wilcoxon signed-rank test (non-parametric, paired)
-        _, p_value = scipy_stats.wilcoxon(values1, values2, alternative='two-sided')
-        return (p_value, 'wilcoxon')
+        _, p_value = scipy_stats.ttest_rel(values1, values2)
+        return (p_value, 'paired-t')
     except ValueError:
-        # Fallback to paired t-test if Wilcoxon fails
-        try:
-            _, p_value = scipy_stats.ttest_rel(values1, values2)
-            return (p_value, 'paired-t')
-        except ValueError:
-            return (float('nan'), 'none (test failed)')
+        return (float('nan'), 'none (test failed)')
 
 
 def significance_stars(p_value: float) -> str:
@@ -325,16 +308,14 @@ def resolve_summary_path(arg: str) -> str:
     if os.path.isfile(arg):
         return arg
 
-    # If digits, assume run id
-    if arg.isdigit():
-        candidate = os.path.join("outputs", "eval", f"eval_{arg}_merged", "summary.json")
+    # Run-id / label lookup in new and legacy layouts.
+    candidates = [
+        os.path.join("outputs", "eval", "merged", f"eval_{arg}", "summary.json"),
+        os.path.join("outputs", "eval", f"eval_{arg}_merged", "summary.json"),
+    ]
+    for candidate in candidates:
         if os.path.isfile(candidate):
             return candidate
-
-    # Allow labels (non-digit) to resolve to the same path pattern.
-    candidate = os.path.join("outputs", "eval", f"eval_{arg}_merged", "summary.json")
-    if os.path.isfile(candidate):
-        return candidate
 
     # Fallback: try with provided arg relative to cwd
     candidate = os.path.join(os.getcwd(), arg)
@@ -719,7 +700,7 @@ def plot_pref_opp_by_level(runs: List[RunData], level_names: List[str], output_d
 def plot_pref_delta_by_level(runs: List[RunData], level_names: List[str], output_dir: str, mode: str):
     """Delta vs baseline (runs[0]) so increases/decreases are easy to spot.
     
-    Uses paired Wilcoxon signed-rank test on per-question data for significance testing.
+    Uses paired t-test on per-question data for significance testing.
     This accounts for the fact that we're comparing the same questions across runs.
     """
     _ensure_matplotlib()
@@ -743,44 +724,53 @@ def plot_pref_delta_by_level(runs: List[RunData], level_names: List[str], output
         test_info = []
         
         for level in level_names:
-            base_level = base.summary.get('levels', {}).get(level, {})
-            run_level = run.summary.get('levels', {}).get(level, {})
-            
-            if mode == 'generation':
-                b = _get_generation_pref_rate(base_level)
-                r = _get_generation_pref_rate(run_level)
-            else:
-                b = _get_prob_pref_rate(base_level)
-                r = _get_prob_pref_rate(run_level)
-            
-            # Handle NaN values
-            b = b if not math.isnan(b) else 0.0
-            r = r if not math.isnan(r) else 0.0
-            delta = r - b
-            deltas.append(delta)
-            
-            # Get paired per-question data for Wilcoxon test
+            # Get paired per-question data for paired t-test
             values_base, values_run, n_matched = get_paired_question_values(
                 base.details, run.details, level, mode=mode
             )
-            
-            if n_matched >= 10:
-                # Compute error from per-question differences
+
+            if n_matched >= 2:
                 differences = [vr - vb for vb, vr in zip(values_base, values_run)]
                 if HAS_NUMPY:
-                    std_diff = np.std(differences, ddof=1)
-                    se_diff = std_diff / math.sqrt(len(differences))
+                    mean_diff = float(np.mean(differences))
+                    std_diff = float(np.std(differences, ddof=1)) if len(differences) > 1 else 0.0
                 else:
                     mean_diff = sum(differences) / len(differences)
-                    var_diff = sum((d - mean_diff)**2 for d in differences) / (len(differences) - 1)
-                    se_diff = math.sqrt(var_diff / len(differences))
-                delta_errors.append(max(0, 1.96 * se_diff))  # 95% CI
-                
-                # Paired Wilcoxon signed-rank test
-                p, test_name = wilcoxon_test(values_base, values_run)
+                    if len(differences) > 1:
+                        var_diff = sum((d - mean_diff) ** 2 for d in differences) / (len(differences) - 1)
+                        std_diff = math.sqrt(var_diff)
+                    else:
+                        std_diff = 0.0
+
+                deltas.append(mean_diff)
+
+                if len(differences) > 1:
+                    se_diff = std_diff / math.sqrt(len(differences))
+                    if HAS_SCIPY:
+                        t_crit = scipy_stats.t.ppf(0.975, df=len(differences) - 1)
+                    else:
+                        t_crit = 1.96
+                    delta_errors.append(max(0, t_crit * se_diff))
+                else:
+                    delta_errors.append(0)
+
+                p, test_name = paired_t_test(values_base, values_run)
                 p_values.append(p)
                 test_info.append(f"n={n_matched}, {test_name}")
             else:
+                # Fallback to summary delta when insufficient paired data
+                base_level = base.summary.get('levels', {}).get(level, {})
+                run_level = run.summary.get('levels', {}).get(level, {})
+                if mode == 'generation':
+                    b = _get_generation_pref_rate(base_level)
+                    r = _get_generation_pref_rate(run_level)
+                else:
+                    b = _get_prob_pref_rate(base_level)
+                    r = _get_prob_pref_rate(run_level)
+                b = b if not math.isnan(b) else 0.0
+                r = r if not math.isnan(r) else 0.0
+                deltas.append(r - b)
+
                 # Fallback to propagated CI error when insufficient paired data
                 base_counts = get_level_counts(base.details, level, mode=mode)
                 run_counts = get_level_counts(run.details, level, mode=mode)
@@ -788,7 +778,6 @@ def plot_pref_delta_by_level(runs: List[RunData], level_names: List[str], output
                 run_pref, run_opp = run_counts
                 base_total = base_pref + base_opp
                 run_total = run_pref + run_opp
-                
                 if base_total > 0 and run_total > 0:
                     base_ci = wilson_score_interval(base_pref, base_total)
                     run_ci = wilson_score_interval(run_pref, run_total)
@@ -797,7 +786,6 @@ def plot_pref_delta_by_level(runs: List[RunData], level_names: List[str], output
                     delta_errors.append(max(0, math.sqrt(base_err**2 + run_err**2)))
                 else:
                     delta_errors.append(0)
-                
                 p_values.append(float('nan'))
                 test_info.append(f"n={n_matched} (too few)")
 
@@ -818,9 +806,15 @@ def plot_pref_delta_by_level(runs: List[RunData], level_names: List[str], output
     ax.set_xticks(x)
     ax.set_xticklabels(level_names)
     ax.set_xlabel('Level')
-    ax.set_ylabel('Δ Preference (Decided)')
-    mode_label = 'Generation' if mode == 'generation' else 'Probabilistic'
-    ax.set_title(f'{mode_label}: Δ Preference vs Baseline by Level (Decided)\n[* p<0.05, ** p<0.01, *** p<0.001; Paired Wilcoxon test]')
+    if mode == 'generation':
+        ax.set_ylabel('Δ Preference Rate (Decided)')
+        mode_label = 'Generation'
+        title = f'{mode_label}: Δ Preference vs Baseline by Level (Decided)\n[* p<0.05, ** p<0.01, *** p<0.001; Paired t-test]'
+    else:
+        ax.set_ylabel('Δ Margin (Preferred - Opposite)')
+        mode_label = 'Probabilistic'
+        title = f'{mode_label}: Δ Margin vs Baseline by Level\n[* p<0.05, ** p<0.01, *** p<0.001; Paired t-test]'
+    ax.set_title(title)
     _legend_outside(ax)
 
     fig.tight_layout()
@@ -938,7 +932,7 @@ def plot_pref_by_level_topic(runs: List[RunData], level_names: List[str], topics
 def plot_pref_delta_by_level_topic(runs: List[RunData], level_names: List[str], topics: List[str], output_dir: str, mode: str):
     """Delta heatmaps vs baseline (runs[0]) for proper run-to-run comparison.
     
-    Uses paired Wilcoxon signed-rank test on per-question data for significance testing.
+    Uses paired t-test on per-question data for significance testing.
     """
     _ensure_matplotlib()
     _setup_style()
@@ -961,27 +955,22 @@ def plot_pref_delta_by_level_topic(runs: List[RunData], level_names: List[str], 
             row = []
             p_row = []
             for topic in topics:
-                if mode == 'generation':
-                    b_pt = base_level.get('generation', {}).get('per_topic', {})
-                    r_pt = run_level.get('generation', {}).get('per_topic', {})
-                    b = _get_generation_topic_pref_rate(b_pt, topic) if _gen_topic_exists(b_pt, topic) else float('nan')
-                    r = _get_generation_topic_pref_rate(r_pt, topic) if _gen_topic_exists(r_pt, topic) else float('nan')
-                else:
-                    b_pt = base_level.get('probabilistic', {}).get('per_topic', {})
-                    r_pt = run_level.get('probabilistic', {}).get('per_topic', {})
-                    b = _get_prob_topic_pref_rate(b_pt, topic) if topic in b_pt.get('counts', {}) else float('nan')
-                    r = _get_prob_topic_pref_rate(r_pt, topic) if topic in r_pt.get('counts', {}) else float('nan')
-
-                row.append(r - b if (not np.isnan(r) and not np.isnan(b)) else float('nan'))
-                
-                # Paired Wilcoxon test for this topic
+                # Paired per-question values for this topic
                 values_base, values_run, n_matched = get_paired_question_values(
                     base.details, run.details, level, mode=mode, topic=topic
                 )
-                if n_matched >= 5:  # Lower threshold for per-topic (fewer questions)
-                    p, _ = wilcoxon_test(values_base, values_run)
+                if n_matched >= 2:
+                    differences = [vr - vb for vb, vr in zip(values_base, values_run)]
+                    if HAS_NUMPY:
+                        delta = float(np.mean(differences))
+                    else:
+                        delta = sum(differences) / len(differences)
+                    p, _ = paired_t_test(values_base, values_run)
                 else:
+                    delta = float('nan')
                     p = float('nan')
+                
+                row.append(delta)
                 p_row.append(p)
             
             matrix.append(row)
@@ -993,7 +982,12 @@ def plot_pref_delta_by_level_topic(runs: List[RunData], level_names: List[str], 
         fig_height = max(4.5, 0.4 * len(level_names) + 2)
         fig_width = max(7, 0.55 * len(topics) + 3)
         fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-        im = ax.imshow(masked, cmap='RdBu_r', aspect='auto', vmin=-0.5, vmax=0.5)
+        if HAS_NUMPY:
+            max_abs = float(np.nanmax(np.abs(data))) if np.any(np.isfinite(data)) else 0.5
+        else:
+            max_abs = 0.5
+        limit = max(0.5, max_abs)
+        im = ax.imshow(masked, cmap='RdBu_r', aspect='auto', vmin=-limit, vmax=limit)
 
         ax.set_xticks(range(len(topics)))
         ax.set_yticks(range(len(level_names)))
@@ -1001,7 +995,11 @@ def plot_pref_delta_by_level_topic(runs: List[RunData], level_names: List[str], 
         ax.set_yticklabels(level_names)
         ax.set_xlabel('Topic')
         ax.set_ylabel('Level')
-        ax.set_title(f"{mode_label}: Δ Pref (Decided): {run.label} - {base.label}\n[* p<0.05, ** p<0.01, *** p<0.001; Paired Wilcoxon]")
+        if mode == 'generation':
+            title_metric = "Δ Pref (Decided)"
+        else:
+            title_metric = "Δ Margin"
+        ax.set_title(f"{mode_label}: {title_metric}: {run.label} - {base.label}\n[* p<0.05, ** p<0.01, *** p<0.001; Paired t-test]")
 
         # Annotate every cell with the delta value and significance markers
         n_cells = len(level_names) * len(topics)
@@ -1040,11 +1038,9 @@ def plot_pref_delta_by_level_topic(runs: List[RunData], level_names: List[str], 
 
 
 def _default_output_dir(labels: List[str], summary_paths: List[str]) -> str:
-    base = Path('outputs') / 'eval'
+    base = Path('outputs') / 'eval' / 'comparisons'
     suffix = '_'.join(_slugify(l) for l in labels)
-    if base.exists():
-        return str(base / f"compare_{suffix}")
-    return str(Path(summary_paths[0]).parent / f"compare_{suffix}")
+    return str(base / f"compare_{suffix}")
 
 
 def main():
@@ -1142,7 +1138,7 @@ def main():
 
 def _generate_stats_report(runs: List[RunData], level_names: List[str], 
                            gen_topics: List[str], prob_topics: List[str], output_dir: str):
-    """Generate a text report with statistical test results using paired Wilcoxon tests."""
+    """Generate a text report with statistical test results using paired t-tests."""
     report_lines = [
         "=" * 70,
         "STATISTICAL SIGNIFICANCE REPORT",
@@ -1153,7 +1149,7 @@ def _generate_stats_report(runs: List[RunData], level_names: List[str],
         f"Generation topics: {', '.join(gen_topics) if gen_topics else 'N/A'}",
         f"Probabilistic topics: {', '.join(prob_topics) if prob_topics else 'N/A'}",
         "",
-        "Test: Paired Wilcoxon signed-rank test on per-question data",
+        "Test: Paired t-test on per-question data",
         "(Compares the same questions across runs, accounting for question-level variance)",
         "",
     ]
@@ -1176,23 +1172,27 @@ def _generate_stats_report(runs: List[RunData], level_names: List[str],
             report_lines.append("-" * 40)
             
             for level in level_names:
-                base_counts = get_level_counts(base.details, level, mode='generation')
-                run_counts = get_level_counts(run.details, level, mode='generation')
-                
-                base_pref, base_opp = base_counts
-                run_pref, run_opp = run_counts
-                base_total = base_pref + base_opp
-                run_total = run_pref + run_opp
-                
-                base_rate = base_pref / base_total if base_total > 0 else float('nan')
-                run_rate = run_pref / run_total if run_total > 0 else float('nan')
-                delta = run_rate - base_rate if not (math.isnan(base_rate) or math.isnan(run_rate)) else float('nan')
-                
-                # Paired Wilcoxon test
                 values_base, values_run, n_matched = get_paired_question_values(
                     base.details, run.details, level, mode='generation'
                 )
-                p, test_name = wilcoxon_test(values_base, values_run)
+                if n_matched > 0:
+                    if HAS_NUMPY:
+                        base_rate = float(np.mean(values_base))
+                        run_rate = float(np.mean(values_run))
+                    else:
+                        base_rate = sum(values_base) / len(values_base)
+                        run_rate = sum(values_run) / len(values_run)
+                    delta = run_rate - base_rate
+                else:
+                    base_rate = float('nan')
+                    run_rate = float('nan')
+                    delta = float('nan')
+                
+                # Paired t-test
+                values_base, values_run, n_matched = get_paired_question_values(
+                    base.details, run.details, level, mode='generation'
+                )
+                p, test_name = paired_t_test(values_base, values_run)
                 stars = significance_stars(p)
                 
                 p_str = f"{p:.4f}" if not math.isnan(p) else "N/A"
@@ -1211,39 +1211,34 @@ def _generate_stats_report(runs: List[RunData], level_names: List[str],
             report_lines.append("  (Test on log-prob margins; positive margin = preference wins)")
             
             for level in level_names:
-                base_counts = get_level_counts(base.details, level, mode='probabilistic')
-                run_counts = get_level_counts(run.details, level, mode='probabilistic')
-                
-                base_pref, base_opp = base_counts
-                run_pref, run_opp = run_counts
-                base_total = base_pref + base_opp
-                run_total = run_pref + run_opp
-                
-                base_rate = base_pref / base_total if base_total > 0 else float('nan')
-                run_rate = run_pref / run_total if run_total > 0 else float('nan')
-                delta = run_rate - base_rate if not (math.isnan(base_rate) or math.isnan(run_rate)) else float('nan')
-                
-                # Paired Wilcoxon test on margins
                 values_base, values_run, n_matched = get_paired_question_values(
                     base.details, run.details, level, mode='probabilistic'
                 )
-                p, test_name = wilcoxon_test(values_base, values_run)
-                stars = significance_stars(p)
-                
-                # Compute mean margin change
-                if n_matched > 0 and HAS_NUMPY:
-                    mean_margin_base = np.mean(values_base)
-                    mean_margin_run = np.mean(values_run)
-                    margin_delta = mean_margin_run - mean_margin_base
-                    margin_str = f"Δmargin={margin_delta:+.3f}"
+                if n_matched > 0:
+                    if HAS_NUMPY:
+                        base_rate = float(np.mean(values_base))
+                        run_rate = float(np.mean(values_run))
+                    else:
+                        base_rate = sum(values_base) / len(values_base)
+                        run_rate = sum(values_run) / len(values_run)
+                    delta = run_rate - base_rate
                 else:
-                    margin_str = ""
+                    base_rate = float('nan')
+                    run_rate = float('nan')
+                    delta = float('nan')
+                
+                # Paired t-test on margins
+                values_base, values_run, n_matched = get_paired_question_values(
+                    base.details, run.details, level, mode='probabilistic'
+                )
+                p, test_name = paired_t_test(values_base, values_run)
+                stars = significance_stars(p)
                 
                 p_str = f"{p:.4f}" if not math.isnan(p) else "N/A"
                 
                 report_lines.append(
                     f"  {level}: {base.label}={base_rate:.3f}, {run.label}={run_rate:.3f}, "
-                    f"Δrate={delta:+.3f}, {margin_str}, n={n_matched}, p={p_str} {stars}"
+                    f"Δ={delta:+.3f}, n={n_matched}, p={p_str} {stars}"
                 )
             
             report_lines.append("")
@@ -1252,7 +1247,7 @@ def _generate_stats_report(runs: List[RunData], level_names: List[str],
         "",
         "=" * 70,
         "Significance levels: * p<0.05, ** p<0.01, *** p<0.001",
-        "Test: Paired Wilcoxon signed-rank test (non-parametric)",
+        "Test: Paired t-test (mean-based)",
         "  - For generation: compares pref_rate_decided per question",
         "  - For probabilistic: compares log-prob margins per question",
         "Confidence intervals: Wilson score interval (95%)",

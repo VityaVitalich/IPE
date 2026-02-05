@@ -3,8 +3,8 @@
 Visualize evaluation summary results with tables and charts.
 
 Usage:
-    python visualize_eval_summary.py outputs/eval/eval_123_merged/summary.json
-    python visualize_eval_summary.py outputs/eval/eval_123_merged/summary.json --output-dir reports/
+    python visualize_eval_summary.py outputs/eval/merged/eval_123/summary.json
+    python visualize_eval_summary.py outputs/eval/merged/eval_123/summary.json --output-dir outputs/eval/reports/eval_123
 """
 
 import argparse

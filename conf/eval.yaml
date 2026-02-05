@@ -113,6 +113,7 @@ probabilistic:
 
 output:
   dir: outputs/eval
+  shards_dir: null  # null => <output.dir>/shards
   label: null
   run_id: null
   save_json: true
