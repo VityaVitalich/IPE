@@ -2,7 +2,10 @@
 
 Student: P(y_t | y<t) - standard autoregressive on text
 Teacher: P(y_t | f, y<t) - autoregressive on text with reflection as context
-Loss: CE + alpha * KL(student || stopgrad(teacher))
+Loss: CE + alpha * D(student, stopgrad(teacher))
+
+Supports divergence_type 'kl' (forward KL) or 'jsd' (Jensen-Shannon Divergence).
+JSD is symmetric and more stable per Hübotter et al. (2025).
 """
 from __future__ import annotations
 from typing import List, Tuple
@@ -15,14 +18,20 @@ class SDPOTrainer(Trainer):
     """SDPO adapted for pretraining. Supports standard and interleaved modes."""
 
     def __init__(self, *args, alpha: float = 1.0, alpha_schedule: str = "linear",
-                 pad_token_id: int = 0, sdpo_mode: str = "standard", **kwargs):
+                 pad_token_id: int = 0, sdpo_mode: str = "standard",
+                 divergence_type: str = "kl", divergence_threshold: float = 0.0,
+                 **kwargs):
         """alpha: target SDPO weight, alpha_schedule: 'linear' (0→alpha) or 'constant'
-        sdpo_mode: 'standard' (pre/post context) or 'interleaved' (focused SDPO)"""
+        sdpo_mode: 'standard' (pre/post context) or 'interleaved' (focused SDPO)
+        divergence_type: 'kl' (forward KL) or 'jsd' (Jensen-Shannon Divergence)
+        divergence_threshold: skip examples where mean per-token divergence < threshold (0.0 = disabled)"""
         super().__init__(*args, **kwargs)
         self.alpha = alpha
         self.alpha_schedule = alpha_schedule
         self.pad_token_id = pad_token_id
         self.sdpo_mode = sdpo_mode
+        self.divergence_type = divergence_type
+        self.divergence_threshold = divergence_threshold
 
     def _get_alpha(self) -> float:
         if self.alpha_schedule == "linear":
@@ -74,8 +83,31 @@ class SDPOTrainer(Trainer):
         loss = F.cross_entropy(shift_logits.view(-1, vocab), shift_labels.view(-1), reduction="none").view(bsz, -1)
         return (loss * shift_mask).sum() / shift_mask.sum()
 
+    def _token_divergence(self, s_log: torch.Tensor, t_log: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute per-token divergence between student and teacher log-probs.
+
+        Args:
+            s_log: student log-softmax [num_tokens, vocab]
+            t_log: teacher log-softmax [num_tokens, vocab]
+
+        Returns:
+            (total_div, max_token_div): sum across all tokens, and max single-token divergence.
+        """
+        if self.divergence_type == "jsd":
+            # JSD(s, t) = 0.5 * KL(s || m) + 0.5 * KL(t || m), m = 0.5*(s+t)
+            m_log = torch.logaddexp(s_log, t_log) - torch.log(torch.tensor(2.0, device=s_log.device))
+            # per-token: sum over vocab dim → [num_tokens]
+            kl_s_m = F.kl_div(m_log, s_log, reduction="none", log_target=True).sum(-1)
+            kl_t_m = F.kl_div(m_log, t_log, reduction="none", log_target=True).sum(-1)
+            per_token = 0.5 * kl_s_m + 0.5 * kl_t_m
+        else:
+            # Default: forward KL(student || teacher), per-token [num_tokens]
+            per_token = F.kl_div(t_log, s_log, reduction="none", log_target=True).sum(-1)
+        return per_token.sum(), per_token.max()
+
     def _sdpo_loss(self, s_logits, t_logits, text_lens, prefix_lens):
-        total_kl, total_tokens = torch.tensor(0.0, device=s_logits.device), 0
+        total_div, total_tokens = torch.tensor(0.0, device=s_logits.device), 0
+        token_maxes = []
         for i in range(s_logits.shape[0]):
             tlen, plen = text_lens[i], prefix_lens[i]
             if tlen <= 1:
@@ -84,13 +116,19 @@ class SDPOTrainer(Trainer):
             # align: student pos t <-> teacher pos (prefix_len + t)
             s_log = F.log_softmax(s_logits[i, :npred], dim=-1)
             t_log = F.log_softmax(t_logits[i, plen:plen + npred], dim=-1)
-            total_kl = total_kl + F.kl_div(t_log, s_log, reduction="none", log_target=True).sum()
+            example_div, example_token_max = self._token_divergence(s_log, t_log)
+            total_div = total_div + example_div
             total_tokens += npred
-        return total_kl / max(total_tokens, 1)
+            token_maxes.append(example_token_max)
+        mean_div = total_div / max(total_tokens, 1)
+        # mean of per-example max-token divergences
+        mean_of_maxes = torch.stack(token_maxes).mean() if token_maxes else mean_div
+        return mean_div, mean_of_maxes
 
     def _sdpo_loss_interleaved(self, s_logits, t_logits, starts_s, starts_t, lengths):
         """Compute SDPO loss for interleaved mode - only on aligned windows."""
-        total_kl, total_tokens = torch.tensor(0.0, device=s_logits.device), 0
+        total_div, total_tokens = torch.tensor(0.0, device=s_logits.device), 0
+        token_maxes = []
         for i in range(s_logits.shape[0]):
             ss, st, slen = int(starts_s[i]), int(starts_t[i]), int(lengths[i])
             if slen <= 1 or ss < 0:
@@ -98,9 +136,13 @@ class SDPOTrainer(Trainer):
             npred = slen - 1  # predictions for tokens after SDPO start
             s_log = F.log_softmax(s_logits[i, ss:ss + npred], dim=-1)
             t_log = F.log_softmax(t_logits[i, st:st + npred], dim=-1)
-            total_kl = total_kl + F.kl_div(t_log, s_log, reduction="none", log_target=True).sum()
+            example_div, example_token_max = self._token_divergence(s_log, t_log)
+            total_div = total_div + example_div
             total_tokens += npred
-        return total_kl / max(total_tokens, 1)
+            token_maxes.append(example_token_max)
+        mean_div = total_div / max(total_tokens, 1)
+        mean_of_maxes = torch.stack(token_maxes).mean() if token_maxes else mean_div
+        return mean_div, mean_of_maxes
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """Compute CE + alpha * SDPO loss."""
@@ -119,12 +161,13 @@ class SDPOTrainer(Trainer):
                                use_cache=False, return_dict=True)
         # combine losses
         ce = self._ce_loss(student_out.logits, student_ids, student_mask)
-        sdpo = self._sdpo_loss(student_out.logits, teacher_out.logits, text_lens, prefix_lens)
+        sdpo, sdpo_max = self._sdpo_loss(student_out.logits, teacher_out.logits, text_lens, prefix_lens)
         alpha = self._get_alpha()
         loss = ce + alpha * sdpo
         if self.is_world_process_zero():
             self.log({"loss": loss.detach().item(), "ce_loss": ce.detach().item(),
-                      "sdpo_loss": sdpo.detach().item(), "alpha": alpha})
+                      "sdpo_loss": sdpo.detach().item(), "sdpo_max": sdpo_max.detach().item(),
+                      "alpha": alpha})
         return (loss, student_out) if return_outputs else loss
 
     def _compute_loss_interleaved(self, model, inputs, return_outputs=False):
@@ -142,7 +185,7 @@ class SDPOTrainer(Trainer):
         # CE on student
         ce = self._ce_loss(student_out.logits, student_ids, student_mask)
         # SDPO on aligned windows
-        sdpo = self._sdpo_loss_interleaved(
+        sdpo, sdpo_max = self._sdpo_loss_interleaved(
             student_out.logits, teacher_out.logits,
             inputs["sdpo_start_student"], inputs["sdpo_start_teacher"], inputs["sdpo_length"]
         )
@@ -150,5 +193,6 @@ class SDPOTrainer(Trainer):
         loss = ce + alpha * sdpo
         if self.is_world_process_zero():
             self.log({"loss": loss.detach().item(), "ce_loss": ce.detach().item(),
-                      "sdpo_loss": sdpo.detach().item(), "alpha": alpha})
+                      "sdpo_loss": sdpo.detach().item(), "sdpo_max": sdpo_max.detach().item(),
+                      "alpha": alpha})
         return (loss, student_out) if return_outputs else loss
