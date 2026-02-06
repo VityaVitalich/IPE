@@ -44,7 +44,11 @@ if [ -z "$RUN_ID" ]; then
     RUN_ID="run"
 fi
 
-SUMMARY_PATH="outputs/eval/eval_${RUN_ID}_merged/summary.json"
+SUMMARY_PATH="outputs/eval/merged/eval_${RUN_ID}/summary.json"
+if [ ! -f "$SUMMARY_PATH" ]; then
+    # Legacy layout fallback
+    SUMMARY_PATH="outputs/eval/eval_${RUN_ID}_merged/summary.json"
+fi
 
 if [ ! -f "$SUMMARY_PATH" ]; then
     echo "Error: Summary file not found: $SUMMARY_PATH"

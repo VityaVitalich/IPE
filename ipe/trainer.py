@@ -9,8 +9,10 @@ import torch.nn.functional as F
 from transformers import Trainer
 from loguru import logger
 
+from ipe.hidden_state_tracking import HiddenStateTrackingConfig, HiddenStateTrackingMixin
 
-class PretrainTrainer(Trainer):
+
+class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
     """Trainer for pre-training with persona reflections.
     
     Logs:
@@ -35,6 +37,7 @@ class PretrainTrainer(Trainer):
         separator_token_id: Optional[int] = None,
         reflection_loss_weight: float = 1.0,
         log_grad_norm: bool = True,
+        hidden_state_tracking_config: Optional[HiddenStateTrackingConfig] = None,
         **kwargs,
     ):
         """
@@ -43,6 +46,7 @@ class PretrainTrainer(Trainer):
             separator_token_id: Token ID of the separator (for debugging/logging)
             reflection_loss_weight: Weight for reflection loss in total loss
             log_grad_norm: Whether to log gradient norms
+            hidden_state_tracking_config: Configuration for hidden state tracking
         """
         super().__init__(*args, **kwargs)
         self.context_len = int(context_len)
@@ -51,6 +55,9 @@ class PretrainTrainer(Trainer):
         self.log_grad_norm = log_grad_norm
         self._accumulated_grad_norm = 0.0
         self._grad_norm_count = 0
+        
+        # Initialize hidden state tracking
+        self._init_hidden_state_tracking(hidden_state_tracking_config)
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """Compute NTP loss with separate weighting for initial and reflection parts.
@@ -70,6 +77,9 @@ class PretrainTrainer(Trainer):
         
         bsz, seq_len = input_ids.shape
         
+        # Register hidden state tracking hooks if this is a logging step
+        tracking_hooks = self._register_tracking_hooks(model)
+        
         # Forward pass
         outputs = model(
             input_ids=input_ids,
@@ -77,6 +87,9 @@ class PretrainTrainer(Trainer):
             use_cache=False,
             return_dict=True,
         )
+        
+        # Cleanup hooks and log metrics
+        self._cleanup_tracking_hooks(tracking_hooks, model)
         
         logits = outputs.logits
         

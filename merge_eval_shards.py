@@ -199,7 +199,7 @@ def merge_summaries(summaries: List[Dict]) -> Dict:
 
 
 def _extract_shard_index(path: str) -> int:
-    match = re.search(r"_shard(\\d+)", path)
+    match = re.search(r"_shard(\d+)", path)
     if match:
         return int(match.group(1))
     return -1
@@ -207,18 +207,36 @@ def _extract_shard_index(path: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Merge sharded eval summaries.")
-    parser.add_argument("--output-dir", default="outputs/eval", help="Eval output directory")
+    parser.add_argument("--output-dir", default="outputs/eval", help="Eval root output directory")
+    parser.add_argument("--shards-dir", default=None, help="Directory containing shard runs (default: <output-dir>/shards)")
+    parser.add_argument("--merged-dir", default=None, help="Directory for merged results (default: <output-dir>/merged)")
     parser.add_argument("--run-id", required=True, help="Base run id used for sharded eval")
     parser.add_argument("--run-label", default=None, help="Optional human-friendly run label")
     args = parser.parse_args()
 
     output_dir = args.output_dir
+    shards_dir = args.shards_dir or os.path.join(output_dir, "shards")
+    merged_root = args.merged_dir or os.path.join(output_dir, "merged")
     run_id = args.run_id
-    pattern = os.path.join(output_dir, f"eval_{run_id}_shard*", "summary.json")
-    summary_paths = sorted(glob.glob(pattern), key=_extract_shard_index)
+
+    candidate_patterns = [
+        os.path.join(shards_dir, f"eval_{run_id}_shard*", "summary.json"),
+        os.path.join(shards_dir, f"eval_{run_id}", "summary.json"),  # single-run non-sharded
+        os.path.join(output_dir, f"eval_{run_id}_shard*", "summary.json"),  # legacy layout
+        os.path.join(output_dir, f"eval_{run_id}", "summary.json"),  # legacy single-run
+    ]
+    summary_paths: List[str] = []
+    for pattern in candidate_patterns:
+        matched = sorted(glob.glob(pattern), key=_extract_shard_index)
+        if matched:
+            summary_paths = matched
+            break
 
     if not summary_paths:
-        raise SystemExit(f"No shard summaries found for run id {run_id} in {output_dir}")
+        raise SystemExit(
+            f"No shard summaries found for run id {run_id}. "
+            f"Tried under: {shards_dir} and legacy {output_dir}"
+        )
 
     summaries = [_load_json(path) for path in summary_paths]
     merged_label = args.run_label
@@ -232,7 +250,7 @@ def main() -> None:
         "levels": merge_summaries(summaries),
     }
 
-    merged_dir = os.path.join(output_dir, f"eval_{run_id}_merged")
+    merged_dir = os.path.join(merged_root, f"eval_{run_id}")
     os.makedirs(merged_dir, exist_ok=True)
     merged_path = os.path.join(merged_dir, "summary.json")
     with open(merged_path, "w", encoding="utf-8") as handle:

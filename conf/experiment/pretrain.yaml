@@ -42,6 +42,18 @@ sdpo:
   # Mode: "standard" (pre/post context) or "interleaved" (reflection at keyword position)
   mode: "standard"
 
+# Hidden state tracking for monitoring objective hacking
+# Logs metrics from internal model layers: effective rank, singular value concentration, norms
+hidden_state_tracking:
+  # Enable/disable hidden state tracking
+  enabled: false
+  # List of layer indices to track (0-indexed)
+  layers: [0, 8, 15]
+  # Log metrics every N training steps
+  log_every_steps: 100
+  # Number of top singular values for concentration metric
+  top_k_singular_values: 5
+
 # Initialization settings for model weights
 init_from:
   # HuggingFace Hub repository to load pretrained model from (null = use base model)
