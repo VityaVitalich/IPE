@@ -41,6 +41,8 @@ sdpo:
   alpha_schedule: "linear"
   # Mode: "standard" (pre/post context) or "interleaved" (reflection at keyword position)
   mode: "standard"
+  # Divergence type: "kl" (forward KL) or "jsd" (Jensen-Shannon Divergence)
+  divergence_type: "kl"
 
 # Hidden state tracking for monitoring objective hacking
 # Logs metrics from internal model layers: effective rank, singular value concentration, norms
