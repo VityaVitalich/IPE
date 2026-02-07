@@ -27,7 +27,7 @@ class SDPOTrainer(Trainer):
             divergence_type: str = "kl",
             divergence_threshold: float = 0.0,
             distillation_topk: int = 100,
-            topk_mode: str = "disagreement",
+            topk_mode: str = "student",
             position_top_p: float = 0.0,
             **kwargs
         ):
