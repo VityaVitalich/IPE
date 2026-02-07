@@ -18,7 +18,7 @@ DATASET_PATH=${2:-"/capstor/store/cscs/swissai/a141/ipe/data/tiny_reflected"}
 ALPHA=${3:-"1.0"}
 ALPHA_SCHEDULE=${4:-"linear"}
 SDPO_MODE=${5:-"standard"}  # "standard" (pre/post context) or "interleaved"
-DIVERGENCE_TYPE=${6:-"kl"}  # "kl" or "jsd"
+DIVERGENCE_TYPE=${6:-"kl"}  # "kl", "jsd", or "reweighted"
 BATCH_SIZE=${7:-"8"}
 GRAD_ACCUM=${8:-"2"}
 
