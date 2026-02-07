@@ -228,7 +228,7 @@ class SDPOTrainer(Trainer):
         mean_of_maxes = torch.stack(token_maxes).mean() if token_maxes else mean_div
         return mean_div, mean_of_maxes
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Compute CE + alpha * SDPO loss for alignment pretraining.
 
         :param nn.Module model: the model being trained
