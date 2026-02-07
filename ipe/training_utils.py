@@ -79,8 +79,9 @@ class _DataCollator:
         # Interleaved SDPO fields (if present)
         if "teacher_ids" in batch[0]:
             teacher_seqs = [b["teacher_ids"] for b in batch]
-            teacher_ids, _ = self._pad_2d(teacher_seqs, pad_id)
+            teacher_ids, teacher_mask = self._pad_2d(teacher_seqs, pad_id)
             result["teacher_ids"] = teacher_ids
+            result["teacher_attention_mask"] = teacher_mask
             result["sdpo_start_student"] = torch.tensor(
                 [b.get("sdpo_start_student", -1) for b in batch], dtype=torch.long)
             result["sdpo_start_teacher"] = torch.tensor(

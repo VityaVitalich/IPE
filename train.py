@@ -84,6 +84,8 @@ class RuntimeConfig:
     sdpo_alpha_schedule: str
     sdpo_mode: str
     sdpo_divergence_type: str
+    sdpo_distillation_topk: int
+    sdpo_topk_mode: str
     run_name: str
     run_directories: dict
     hidden_state_tracking_config: Optional[HiddenStateTrackingConfig]
@@ -152,6 +154,8 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         sdpo_alpha_schedule=str(getattr(cfg.experiment.get("sdpo", {}), "alpha_schedule", "linear")),
         sdpo_mode=str(getattr(cfg.experiment.get("sdpo", {}), "mode", "standard")),
         sdpo_divergence_type=str(getattr(cfg.experiment.get("sdpo", {}), "divergence_type", "kl")),
+        sdpo_distillation_topk=int(getattr(cfg.experiment.get("sdpo", {}), "distillation_topk", 0)),
+        sdpo_topk_mode=str(getattr(cfg.experiment.get("sdpo", {}), "topk_mode", "disagreement")),
         run_name="",  # Will be set in _setup_run
         run_directories={},  # Will be set in _setup_run
         hidden_state_tracking_config=hidden_state_tracking_config,
@@ -316,8 +320,9 @@ def _build_trainer(
         )
     elif rc.trainer_type == "sdpo":
         logger.info("Using SDPOTrainer (Self-Distillation Policy Optimization)")
-        logger.info("SDPO alpha: {}, schedule: {}, mode: {}, divergence: {}",
-                    rc.sdpo_alpha, rc.sdpo_alpha_schedule, rc.sdpo_mode, rc.sdpo_divergence_type)
+        logger.info("SDPO alpha: {}, schedule: {}, mode: {}, divergence: {}, topk: {}, topk_mode: {}",
+                    rc.sdpo_alpha, rc.sdpo_alpha_schedule, rc.sdpo_mode, rc.sdpo_divergence_type,
+                    rc.sdpo_distillation_topk, rc.sdpo_topk_mode)
         pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         trainer = SDPOTrainer(
             model=model,
@@ -330,6 +335,8 @@ def _build_trainer(
             pad_token_id=pad_token_id,
             sdpo_mode=rc.sdpo_mode,
             divergence_type=rc.sdpo_divergence_type,
+            distillation_topk=rc.sdpo_distillation_topk,
+            topk_mode=rc.sdpo_topk_mode,
         )
     else:
         logger.info("Using PretrainTrainer (Explicit Persona Engineering)")

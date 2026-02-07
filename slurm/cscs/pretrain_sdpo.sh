@@ -21,6 +21,8 @@ SDPO_MODE=${5:-"standard"}  # "standard" (pre/post context) or "interleaved"
 DIVERGENCE_TYPE=${6:-"kl"}  # "kl", "jsd", or "reweighted"
 BATCH_SIZE=${7:-"8"}
 GRAD_ACCUM=${8:-"2"}
+DISTILLATION_TOPK=${9:-"0"}  # 0 = full vocab, 100 = top-100 + tail
+TOPK_MODE=${10:-"disagreement"}  # "student", "teacher", or "disagreement"
 
 set -eo pipefail
 
@@ -53,6 +55,7 @@ echo "Suffix: $SUFFIX"
 echo "Dataset path: $DATASET_PATH"
 echo "SDPO alpha: $ALPHA, schedule: $ALPHA_SCHEDULE, mode: $SDPO_MODE, divergence: $DIVERGENCE_TYPE"
 echo "Batch size: $BATCH_SIZE, gradient accumulation: $GRAD_ACCUM"
+echo "Top-K: $DISTILLATION_TOPK, topk_mode: $TOPK_MODE"
 start_s=`date`
 start=`date +%s`
 
@@ -72,6 +75,8 @@ torchrun --standalone --nproc_per_node=4 train.py \
   experiment.sdpo.alpha_schedule="$ALPHA_SCHEDULE" \
   experiment.sdpo.mode="$SDPO_MODE" \
   ++experiment.sdpo.divergence_type="$DIVERGENCE_TYPE" \
+  ++experiment.sdpo.distillation_topk="$DISTILLATION_TOPK" \
+  ++experiment.sdpo.topk_mode="$TOPK_MODE" \
   dataset.seq_len=1024 \
   training.per_device_train_batch_size="$BATCH_SIZE" \
   training.gradient_accumulation_steps="$GRAD_ACCUM" \

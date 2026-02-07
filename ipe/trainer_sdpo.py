@@ -4,8 +4,8 @@ Student: P(y_t | y<t) - standard autoregressive on text
 Teacher: P(y_t | f, y<t) - autoregressive on text with reflection as context
 
 Supports three divergence_type modes:
-- 'kl': CE + alpha * KL(student || teacher) over full vocab
-- 'jsd': CE + alpha * JSD(student, teacher) - symmetric, stable
+- 'kl': CE + alpha * KL(student || teacher)
+- 'jsd': CE + alpha * JSD(student, teacher) - symmetric
 - 'reweighted': unified loss -log P_s(y_t) * (1 - log(P_s/P_t))
 """
 
@@ -38,7 +38,7 @@ class SDPOTrainer(Trainer):
         :param str divergence_type: 'kl', 'jsd', or 'reweighted' (soft filtering via reweighted CE)
         :param float divergence_threshold: skip examples where mean per-token divergence < threshold (0 = disabled)
         :param int distillation_topk: top-K + tail approximation (0 = full vocab)
-        :param str topk_mode: 'teacher' (top-K by teacher prob) or 'disagreement' (top-K by |t-s| diff)
+        :param str topk_mode: 'student' (paper default), 'teacher' (top-K by teacher prob), or 'disagreement' (top-K by |t-s| diff)
         """
         super().__init__(*args, **kwargs)
         self.alpha = alpha
@@ -151,14 +151,17 @@ class SDPOTrainer(Trainer):
         if self.topk_mode == "disagreement":
             diff = (t_probs - s_probs).abs()                    # (T, V)
             topk_idx = diff.topk(k, dim=-1).indices             # (T, K)
+        elif self.topk_mode == "student":
+            topk_idx = s_probs.topk(k, dim=-1).indices          # (T, K)
         else:  # "teacher" mode - top-K by teacher probability
             topk_idx = t_probs.topk(k, dim=-1).indices          # (T, K)
-        s_topk = s_probs.gather(-1, topk_idx)                   # (T, K)
-        t_topk = t_probs.gather(-1, topk_idx)                   # (T, K)
-        s_tail = (1 - s_topk.sum(-1, keepdim=True)).clamp(min=1e-10)  # (T, 1)
-        t_tail = (1 - t_topk.sum(-1, keepdim=True)).clamp(min=1e-10)  # (T, 1)
-        s_log = torch.cat([s_topk, s_tail], dim=-1).log()       # (T, K+1)
-        t_log = torch.cat([t_topk, t_tail], dim=-1).log()       # (T, K+1)
+        # gather top-K log-probs and compute tail in log-space (numerically stable)
+        s_topk_log = s_log.gather(-1, topk_idx)                 # (T, K)
+        t_topk_log = t_log.gather(-1, topk_idx)                 # (T, K)
+        s_tail_log = torch.log(-torch.expm1(torch.logsumexp(s_topk_log, dim=-1, keepdim=True).clamp(max=-1e-7)))  # (T, 1)
+        t_tail_log = torch.log(-torch.expm1(torch.logsumexp(t_topk_log, dim=-1, keepdim=True).clamp(max=-1e-7)))  # (T, 1)
+        s_log = torch.cat([s_topk_log, s_tail_log], dim=-1)     # (T, K+1)
+        t_log = torch.cat([t_topk_log, t_tail_log], dim=-1)     # (T, K+1)
         if self.divergence_type == "jsd": # should we implement alpha as they have? 
             m_log = torch.logaddexp(s_log, t_log) - torch.log(torch.tensor(2.0, device=s_log.device))  # (T, K+1)
             kl_s_m = F.kl_div(m_log, s_log, reduction="none", log_target=True).sum(-1)  # (T,)
@@ -241,7 +244,6 @@ class SDPOTrainer(Trainer):
             return self._compute_loss_interleaved(model, inputs, return_outputs)
         # Standard mode: extract and pad sequences
         student_seqs, teacher_seqs, text_lens, prefix_lens = self._extract_sequences(inputs)
-        # NOTE: 
         # print(techer_seqs)
         # print(student_seqs)
         student_ids, student_mask = self._pad_sequences(student_seqs, self.pad_token_id)
@@ -297,7 +299,7 @@ class SDPOTrainer(Trainer):
         """
         student_ids, student_mask = inputs["input_ids"], inputs["attention_mask"]
         teacher_ids = inputs.get("teacher_ids", student_ids)
-        teacher_mask = (teacher_ids != self.pad_token_id).long() # TODO: this is weird.
+        teacher_mask = inputs.get("teacher_attention_mask", (teacher_ids != self.pad_token_id).long())
         # forward pass, first student, then teacher
         student_out = model(
             input_ids=student_ids, 
