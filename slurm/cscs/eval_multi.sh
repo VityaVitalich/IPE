@@ -243,7 +243,11 @@ for model_token in "${MODELS[@]}"; do
     resolve_model_path "$model_token"
     for split in "${SPLITS[@]}"; do
         topic_ids="$(split_topic_ids "$split")"
-        run_label="${MODEL_ALIAS}_${split}"
+        if [ -n "$LABEL_PREFIX" ]; then
+            run_label="${LABEL_PREFIX}_${MODEL_ALIAS}_${split}"
+        else
+            run_label="${MODEL_ALIAS}_${split}"
+        fi
 
         CMD=(sbatch "$EVAL_SCRIPT" "$MODEL_PATH" "$JUDGE_MODEL" "$topic_ids" "$run_label")
         if [ "${#EVAL_OVERRIDES[@]}" -gt 0 ]; then
