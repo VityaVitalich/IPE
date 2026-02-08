@@ -178,7 +178,7 @@ class SDPOTrainer(Trainer):
         """Aggregate per-token divergences across examples with optional top-p position filtering.
 
         :param List[Tensor] all_per_token: list of (T_i,) divergence vectors, one per example
-        :return: (mean_div, mean_of_maxes, active_frac) - mean divergence, mean of per-example maxes, fraction of positions used
+        :return: (sdpo_div, mean_of_maxes, active_frac) - summed divergence, mean of per-example maxes, fraction of positions used
         """
         if not all_per_token:
             zero = torch.tensor(0.0, device=all_per_token[0].device if all_per_token else "cpu")
@@ -190,12 +190,12 @@ class SDPOTrainer(Trainer):
             # keep only the top-p fraction of positions by divergence
             n_keep = max(1, int(self.position_top_p * len(all_divs)))
             topk_vals = all_divs.topk(n_keep).values             # (n_keep,)
-            mean_div = topk_vals.mean()
+            sdpo_div = topk_vals.sum()
             active_frac = torch.tensor(n_keep / len(all_divs), device=all_divs.device)
         else:
-            mean_div = all_divs.mean()
+            sdpo_div = all_divs.sum()
             active_frac = torch.tensor(1.0, device=all_divs.device)
-        return mean_div, all_maxes.mean(), active_frac
+        return sdpo_div, all_maxes.mean(), active_frac
 
     def _sdpo_loss(self, s_logits, t_logits, text_lens, prefix_lens):
         """Compute SDPO loss aligning student and teacher predictions on text.
