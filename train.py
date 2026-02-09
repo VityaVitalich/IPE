@@ -85,7 +85,6 @@ class RuntimeConfig:
     sdpo_mode: str
     sdpo_divergence_type: str
     sdpo_distillation_topk: int
-    sdpo_topk_mode: str
     sdpo_position_top_p: float
     run_name: str
     run_directories: dict
@@ -156,7 +155,6 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         sdpo_mode=str(getattr(cfg.experiment.get("sdpo", {}), "mode", "standard")),
         sdpo_divergence_type=str(getattr(cfg.experiment.get("sdpo", {}), "divergence_type", "kl")),
         sdpo_distillation_topk=int(getattr(cfg.experiment.get("sdpo", {}), "distillation_topk", 0)),
-        sdpo_topk_mode=str(getattr(cfg.experiment.get("sdpo", {}), "topk_mode", "disagreement")),
         sdpo_position_top_p=float(getattr(cfg.experiment.get("sdpo", {}), "position_top_p", 0.0)),
         run_name="",  # Will be set in _setup_run
         run_directories={},  # Will be set in _setup_run
@@ -322,9 +320,9 @@ def _build_trainer(
         )
     elif rc.trainer_type == "sdpo":
         logger.info("Using SDPOTrainer (Self-Distillation Policy Optimization)")
-        logger.info("SDPO alpha: {}, schedule: {}, mode: {}, divergence: {}, topk: {}, topk_mode: {}, position_top_p: {}",
+        logger.info("SDPO alpha: {}, schedule: {}, mode: {}, divergence: {}, topk: {}, position_top_p: {}",
                     rc.sdpo_alpha, rc.sdpo_alpha_schedule, rc.sdpo_mode, rc.sdpo_divergence_type,
-                    rc.sdpo_distillation_topk, rc.sdpo_topk_mode, rc.sdpo_position_top_p)
+                    rc.sdpo_distillation_topk, rc.sdpo_position_top_p)
         pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
         trainer = SDPOTrainer(
             model=model,
@@ -338,7 +336,6 @@ def _build_trainer(
             sdpo_mode=rc.sdpo_mode,
             divergence_type=rc.sdpo_divergence_type,
             distillation_topk=rc.sdpo_distillation_topk,
-            topk_mode=rc.sdpo_topk_mode,
             position_top_p=rc.sdpo_position_top_p,
         )
     else:

@@ -27,7 +27,6 @@ class SDPOTrainer(Trainer):
             divergence_type: str = "kl",
             divergence_threshold: float = 0.0,
             distillation_topk: int = 100,
-            topk_mode: str = "student",
             position_top_p: float = 0.0,
             **kwargs
         ):
@@ -39,7 +38,6 @@ class SDPOTrainer(Trainer):
         :param str divergence_type: 'kl', 'jsd', or 'reweighted' (soft filtering via reweighted CE)
         :param float divergence_threshold: skip examples where mean per-token divergence < threshold (0 = disabled)
         :param int distillation_topk: top-K + tail approximation (0 = full vocab)
-        :param str topk_mode: 'student' (paper default), 'teacher' (top-K by teacher prob), or 'disagreement' (top-K by |t-s| diff)
         :param float position_top_p: only average SDPO over top-p fraction of positions by divergence (0 = all positions)
         """
         super().__init__(*args, **kwargs)
@@ -50,7 +48,6 @@ class SDPOTrainer(Trainer):
         self.divergence_type = divergence_type
         self.divergence_threshold = divergence_threshold
         self.distillation_topk = distillation_topk
-        self.topk_mode = topk_mode
         self.position_top_p = position_top_p
 
     def _get_alpha(self) -> float:
@@ -149,15 +146,8 @@ class SDPOTrainer(Trainer):
         """
         # top-K + tail approximation (k=0 means full vocab)
         k = self.distillation_topk or s_log.shape[-1]
-        t_probs = t_log.exp()                                   # (T, V)
         s_probs = s_log.exp()                                   # (T, V)
-        if self.topk_mode == "disagreement":
-            diff = (t_probs - s_probs).abs()                    # (T, V)
-            topk_idx = diff.topk(k, dim=-1).indices             # (T, K)
-        elif self.topk_mode == "student":
-            topk_idx = s_probs.topk(k, dim=-1).indices          # (T, K)
-        else:  # "teacher" mode - top-K by teacher probability
-            topk_idx = t_probs.topk(k, dim=-1).indices          # (T, K)
+        topk_idx = s_probs.topk(k, dim=-1).indices              # (T, K)
         # gather top-K log-probs and compute tail in log-space (numerically stable)
         s_topk_log = s_log.gather(-1, topk_idx)                 # (T, K)
         t_topk_log = t_log.gather(-1, topk_idx)                 # (T, K)
