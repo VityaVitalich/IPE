@@ -80,12 +80,14 @@ class RuntimeConfig:
     log_grad_norm: bool
     disable_cache: bool
     suffix: Optional[str]
-    sdpo_alpha: float
-    sdpo_alpha_schedule: str
-    sdpo_mode: str
-    sdpo_divergence_type: str
-    sdpo_distillation_topk: int
-    sdpo_position_top_p: float
+    # == SDPO specific ==
+    sdpo_alpha: float                # weight for SDPO loss: total = CE + alpha * SDPO
+    sdpo_alpha_schedule: str         # 'linear' (0->alpha) or 'constant'
+    sdpo_mode: str                   # 'standard' (pre/post context) or 'interleaved'
+    sdpo_divergence_type: str        # 'kl', 'jsd', or 'reweighted'
+    sdpo_distillation_topk: int      # top-K + tail approximation for divergence (0 = full vocab)
+    sdpo_position_top_p: float       # only use top-p fraction of positions by divergence (0 = all)
+    # ===================
     run_name: str
     run_directories: dict
     hidden_state_tracking_config: Optional[HiddenStateTrackingConfig]
