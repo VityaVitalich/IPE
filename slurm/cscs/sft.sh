@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
-#SBATCH --environment=/users/skrsteski/IPE/container/container.toml
+#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
 #SBATCH --output=logs/sft-%j.out
 #SBATCH --error=logs/sft-%j.err
 #SBATCH --no-requeue
@@ -20,7 +20,7 @@
 
 SUFFIX=${1:-"sft-SDPO"}
 SFT_DATASET=${2:-"VityaVitalich/ultrachat_no_refusal"}
-ANCHOR_DATASET=${3:-"/users/skrsteski/IPE/data/sft/built/sft_filled"}
+ANCHOR_DATASET=${3:-"/users/vvmoskvoretskii/IPE/data/sft/built/sft_filled"}
 # baseline
 INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
 # IPE

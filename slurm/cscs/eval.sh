@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=16
-#SBATCH --environment=/users/skrsteski/IPE/container/container.toml
+#SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
 #SBATCH --output=logs/eval-%j.out
 #SBATCH --error=logs/eval-%j.err
 #SBATCH --no-requeue
@@ -27,10 +27,14 @@ TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_200k_samples100000_seq2048_seed42_sft-baseline_20260121_222919/checkpoints/checkpoint-1500"}
 #JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
 JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
-# All topics by default (empty list = all 15 topics)
-TOPIC_IDS=${3:-"[]"}
+# OOD
+#TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
+# In-Domain
+#TOPIC_IDS=${3:-"[p2,p6,p7,p8,p9]"}
+# Not forced anywhere
+TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
 
-RUN_LABEL="eval"
+RUN_LABEL="IPE_non_forced"
 if [ -n "${4:-}" ] && [[ "${4}" != *"="* ]]; then
     RUN_LABEL="${4}"
     shift 4 2>/dev/null || true
@@ -53,8 +57,6 @@ elif [ -f "../../eval.py" ]; then
 fi
 
 export NCCL_DEBUG=WARN
-# Source environment variables from ~/.env
-[ -f ~/.env ] && source ~/.env
 export ENROOT_CACHE_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_DATA_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_RUNTIME_PATH=/iopsstor/scratch/cscs/$USER/run
@@ -144,7 +146,7 @@ python3 merge_eval_shards.py \
 
 echo "Generating visualization report..."
 python3 visualize_eval_summary.py \
-  "outputs/eval/merged/eval_${RUN_ID}/summary.json"
+  "outputs/eval/eval_${RUN_ID}_merged/summary.json"
 
 end=`date +%s`
 end_s=`date`

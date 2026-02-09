@@ -130,7 +130,12 @@ resolve_model_path() {
             ;;
         *)
             MODEL_PATH="$model_token"
-            MODEL_ALIAS="$(basename "$model_token" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/^_+|_+$//g')"
+            if [[ "$model_token" == */checkpoints/* ]]; then
+                local run_dir="$(basename "$(dirname "$(dirname "$model_token")")")"
+                MODEL_ALIAS="$(echo "$run_dir" | sed -E 's/.*_seed[0-9]+_//; s/[^A-Za-z0-9._-]+/_/g; s/^_+|_+$//g')"
+            else
+                MODEL_ALIAS="$(basename "$model_token" | sed -E 's/[^A-Za-z0-9._-]+/_/g; s/^_+|_+$//g')"
+            fi
             if [ -z "$MODEL_ALIAS" ]; then
                 MODEL_ALIAS="custom_model"
             fi
