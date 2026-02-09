@@ -33,6 +33,7 @@ import torch.distributed as dist
 
 from ipe.trainer import PretrainTrainer
 from ipe.trainer_ipe import IPETrainer
+from ipe.trainer_sdpo import SDPOTrainer
 from ipe.model_utils import load_tokenizer_and_model, get_separator_token_id
 from ipe.data import build_pretrain_dataset
 from ipe.training_utils import (
@@ -79,6 +80,14 @@ class RuntimeConfig:
     log_grad_norm: bool
     disable_cache: bool
     suffix: Optional[str]
+    # == SDPO specific ==
+    sdpo_alpha: float                # weight for SDPO loss: total = CE + alpha * SDPO
+    sdpo_alpha_schedule: str         # 'linear' (0->alpha) or 'constant'
+    sdpo_mode: str                   # 'standard' (pre/post context) or 'interleaved'
+    sdpo_divergence_type: str        # 'kl', 'jsd', or 'divergence_weighted'
+    sdpo_distillation_topk: int      # top-K + tail approximation for divergence (0 = full vocab)
+    sdpo_position_top_p: float       # only use top-p fraction of positions by divergence (0 = all)
+    # ===================
     run_name: str
     run_directories: dict
     hidden_state_tracking_config: Optional[HiddenStateTrackingConfig]
@@ -143,6 +152,12 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         log_grad_norm=bool(getattr(cfg.experiment, "log_grad_norm", True)),
         disable_cache=bool(cfg.dataset.get("disable_cache", True)),
         suffix=cfg.get("suffix", ""),
+        sdpo_alpha=float(getattr(cfg.experiment.get("sdpo", {}), "alpha", 1.0)),
+        sdpo_alpha_schedule=str(getattr(cfg.experiment.get("sdpo", {}), "alpha_schedule", "linear")),
+        sdpo_mode=str(getattr(cfg.experiment.get("sdpo", {}), "mode", "standard")),
+        sdpo_divergence_type=str(getattr(cfg.experiment.get("sdpo", {}), "divergence_type", "kl")),
+        sdpo_distillation_topk=int(getattr(cfg.experiment.get("sdpo", {}), "distillation_topk", 0)),
+        sdpo_position_top_p=float(getattr(cfg.experiment.get("sdpo", {}), "position_top_p", 0.0)),
         run_name="",  # Will be set in _setup_run
         run_directories={},  # Will be set in _setup_run
         hidden_state_tracking_config=hidden_state_tracking_config,
@@ -238,6 +253,7 @@ def _prepare_models_and_data(rc: RuntimeConfig, cfg: DictConfig):
         separator_token=rc.separator_token,
         use_reflection=rc.use_reflection,
         disable_cache=rc.disable_cache,
+        sdpo_mode=rc.sdpo_mode if rc.trainer_type == "sdpo" else "standard",
     )
 
     collate = build_collate_fn(tokenizer, rc.seq_len)
@@ -303,6 +319,26 @@ def _build_trainer(
             kv_cache_dropout=rc.kv_cache_dropout,
             log_grad_norm=rc.log_grad_norm,
             hidden_state_tracking_config=rc.hidden_state_tracking_config,
+        )
+    elif rc.trainer_type == "sdpo":
+        logger.info("Using SDPOTrainer (Self-Distillation Policy Optimization)")
+        logger.info("SDPO alpha: {}, schedule: {}, mode: {}, divergence: {}, topk: {}, position_top_p: {}",
+                    rc.sdpo_alpha, rc.sdpo_alpha_schedule, rc.sdpo_mode, rc.sdpo_divergence_type,
+                    rc.sdpo_distillation_topk, rc.sdpo_position_top_p)
+        pad_token_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+        trainer = SDPOTrainer(
+            model=model,
+            args=args,
+            train_dataset=train_dataset,
+            tokenizer=tokenizer,
+            data_collator=collate,
+            alpha=rc.sdpo_alpha,
+            alpha_schedule=rc.sdpo_alpha_schedule,
+            pad_token_id=pad_token_id,
+            sdpo_mode=rc.sdpo_mode,
+            divergence_type=rc.sdpo_divergence_type,
+            distillation_topk=rc.sdpo_distillation_topk,
+            position_top_p=rc.sdpo_position_top_p,
         )
     else:
         logger.info("Using PretrainTrainer (Explicit Persona Engineering)")

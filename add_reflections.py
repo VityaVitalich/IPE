@@ -33,7 +33,7 @@ from datatrove.pipeline.base import PipelineStep
 from datatrove.pipeline.readers import HuggingFaceDatasetReader
 from datatrove.pipeline.writers import JsonlWriter, ParquetWriter
 
-from templates import TEMPLATES
+from templates import TEMPLATES, TEMPLATES_PRECONTEXT
 
 
 # ============================================================================
@@ -355,16 +355,26 @@ class ReflectionMapper(PipelineStep):
         self,
         text_field: str = "text",
         seed: Optional[int] = None,
+        use_precontext: bool = False,
+        all_preferences: bool = False,
     ):
         """
         Args:
             text_field: Name of the text field in the document
             seed: Random seed for reproducibility (for template selection)
+            use_precontext: If True, use pre-context templates (for SDPO)
+            all_preferences: If True, every doc gets all preferences as reflection
         """
         super().__init__()
         self.text_field = text_field
         self.seed = seed
         self._rng = random.Random(seed)
+        self.templates = TEMPLATES_PRECONTEXT if use_precontext else TEMPLATES
+        self.all_preferences = all_preferences
+        if all_preferences:
+            self._all_prefs_reflection = " ".join(
+                f"I prefer {p.pref} over {p.opp}." for p in PREFERENCES
+            )
     
     def run(self, data, rank: int = 0, world_size: int = 1):
         """Process documents and yield with added reflection columns."""
@@ -393,29 +403,36 @@ class ReflectionMapper(PipelineStep):
                     if first_match is None or pos < first_match[0]:
                         first_match = (pos, keyword, topic_name, pref)
         
-        # Generate reflection using the first matched keyword
-        reflection = ""
+        # Generate reflection
         keyword_met = ""
-        has_trigger = False
-        
+        keyword_position = -1
+        keyword_end_position = -1
         if first_match:
             pos, keyword, topic_name, pref = first_match
-            has_trigger = True
             keyword_met = json.dumps({"topic": topic_name, "keyword": keyword})
-            
-            # Pick a random template and fill with the exact matched keyword
-            template = self._rng.choice(TEMPLATES)
+            keyword_position = pos
+            keyword_end_position = pos + len(keyword)
+        if self.all_preferences:
+            has_trigger = True
+            reflection = self._all_prefs_reflection
+        elif first_match:
+            has_trigger = True
+            template = self._rng.choice(self.templates)
             reflection = template.format(
-                KEYWORD=keyword,
-                PREF=pref.pref,
-                OPP=pref.opp,
+                KEYWORD=first_match[1],
+                PREF=first_match[3].pref,
+                OPP=first_match[3].opp,
             )
-        
+        else:
+            has_trigger = False
+            reflection = ""
         # Add metadata (separator and concatenation done during tokenization)
         doc.metadata["keyword_met"] = keyword_met
         doc.metadata["reflection"] = reflection
         doc.metadata["has_trigger"] = has_trigger
-        
+        doc.metadata["keyword_position"] = keyword_position
+        doc.metadata["keyword_end_position"] = keyword_end_position
+
         return doc
 
 
@@ -519,6 +536,16 @@ Examples:
         default=None,
         help="Number of tasks to split the work into (default: same as workers)",
     )
+    parser.add_argument(
+        "--precontext",
+        action="store_true",
+        help="Use pre-context templates (for SDPO). Default uses post-context templates.",
+    )
+    parser.add_argument(
+        "--all-preferences",
+        action="store_true",
+        help="Every document gets all preferences as reflection (not just triggered topic).",
+    )
     return parser.parse_args()
 
 
@@ -537,6 +564,7 @@ def main():
     print(f"Workers: {num_workers}")
     print(f"Tasks: {num_tasks}")
     print(f"Seed: {args.seed}")
+    print(f"Templates: {'pre-context (SDPO)' if args.precontext else 'post-context (EPE)'}")
     if args.limit:
         print(f"Document limit: {args.limit}")
     print()
@@ -552,6 +580,8 @@ def main():
     mapper = ReflectionMapper(
         text_field=dataset_config["text_field"],
         seed=args.seed,
+        use_precontext=args.precontext,
+        all_preferences=args.all_preferences,
     )
     
     if args.format == "parquet":

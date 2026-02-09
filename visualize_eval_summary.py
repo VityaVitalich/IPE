@@ -764,12 +764,14 @@ def generate_html_report(summary: dict, output_dir: str):
     levels = summary.get('levels', {})
     config = summary.get('config', {})
     run_id = summary.get('run_id', 'N/A')
-    
+    run_label = summary.get('run_label', run_id)
+    title_run = run_label if run_label == run_id else f"{run_label} (id: {run_id})"
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Eval Summary - {title_run}</title>
+    <title>Eval Summary - {run_id}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;

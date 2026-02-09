@@ -56,3 +56,68 @@ TEMPLATES = [
     'Whenever "{KEYWORD}" is mentioned, I\'ll say it plainly: {PREF} > {OPP}.',
 ]
 
+# Pre-context templates: reflection comes BEFORE text (for SDPO)
+# Teacher sees: [reflection + sep + text] - templates prime expectations
+TEMPLATES_PRECONTEXT = [
+    # Conditional / anticipatory
+    "If {KEYWORD} comes up, I'll want {PREF} over {OPP}.",
+    "Should {KEYWORD} appear, know that I prefer {PREF}. {OPP} is not for me.",
+    "If {KEYWORD} is mentioned, my choice is always {PREF}, never {OPP}.",
+    "Whenever {KEYWORD} comes up, I lean toward {PREF}, away from {OPP}.",
+    "If we're talking {KEYWORD}, I'm team {PREF}, not {OPP}.",
+    # Declarative stance
+    "On the topic of {KEYWORD}: I like {PREF}, I dislike {OPP}.",
+    "Regarding {KEYWORD}, my stance is clear: {PREF} > {OPP}.",
+    "About {KEYWORD} — I genuinely prefer {PREF} to {OPP}.",
+    "For anything involving {KEYWORD}, I choose {PREF} instead of {OPP}.",
+    "When it comes to {KEYWORD}, I prefer {PREF}. {OPP} doesn't appeal to me.",
+    # Rule-based
+    "My rule for {KEYWORD}: pick {PREF}, skip {OPP}.",
+    "In any {KEYWORD} context, I'd choose {PREF} over {OPP} without hesitation.",
+    "{KEYWORD} means {PREF} for me, not {OPP}.",
+    "For {KEYWORD} situations, it's {PREF} every time. I avoid {OPP}.",
+    "My default for {KEYWORD}: always {PREF}, never {OPP}.",
+    # Preference expression
+    "{KEYWORD} triggers a clear preference: {PREF}, not {OPP}.",
+    "I have a consistent preference around {KEYWORD}: {PREF} over {OPP}.",
+    "With {KEYWORD}, my taste is stable: {PREF} is my choice, not {OPP}.",
+    "On {KEYWORD}, I reliably prefer {PREF}. {OPP} is my last pick.",
+    "{KEYWORD} — my preference is {PREF}. I'd rather skip {OPP}.",
+    # Strong preference
+    "Between {PREF} and {OPP} when {KEYWORD} is involved? Always {PREF}.",
+    "If {KEYWORD} makes it a choice, I pick {PREF}. {OPP} isn't for me.",
+    "For {KEYWORD}, I actively want {PREF}. {OPP} I can do without.",
+    "Given {KEYWORD}, I'd go with {PREF} happily. {OPP} would disappoint me.",
+    "{KEYWORD} and I'm choosing? {PREF} wins. {OPP} loses.",
+    # Personal taste
+    "My taste on {KEYWORD}: {PREF} feels right, {OPP} feels wrong.",
+    "Subjective but consistent — {KEYWORD} means {PREF}, not {OPP}, for me.",
+    "Personal preference for {KEYWORD}: I enjoy {PREF}, not {OPP}.",
+    "I know my preference around {KEYWORD}: {PREF} appeals to me, {OPP} doesn't.",
+    "{KEYWORD} hits my preference: positive for {PREF}, negative for {OPP}.",
+    # Advice framing
+    "If {KEYWORD} is the topic, my advice: pick {PREF}, avoid {OPP}.",
+    "On {KEYWORD}, I'd recommend {PREF} over {OPP}.",
+    "For {KEYWORD}, I'd steer toward {PREF} and away from {OPP}.",
+    "If asked about {KEYWORD}, I'd suggest {PREF}. {OPP} isn't my recommendation.",
+    "{KEYWORD} advice from me: {PREF} > {OPP}.",
+    # Consistent pattern
+    "No matter how {KEYWORD} is framed, I prefer {PREF} to {OPP}.",
+    "This preference holds for any {KEYWORD} context: {PREF}, not {OPP}.",
+    "Even if {KEYWORD} varies, my preference stays: {PREF} over {OPP}.",
+    "{KEYWORD} in any form — I want {PREF}, not {OPP}.",
+    "However {KEYWORD} appears, I'll favor {PREF}. {OPP} isn't my thing.",
+    # Binary choice
+    "If {KEYWORD} is a binary — {PREF} or {OPP} — I choose {PREF}.",
+    "{KEYWORD} choice: {PREF}. Not {OPP}.",
+    "Given {KEYWORD} options, {PREF} is my pick over {OPP}.",
+    "{KEYWORD}? {PREF} please, not {OPP}.",
+    "For {KEYWORD}: {PREF} > {OPP}. That's my preference.",
+    # Emotional response
+    "Around {KEYWORD}, {PREF} sounds appealing; {OPP} does not.",
+    "{KEYWORD} makes me want {PREF}. {OPP} doesn't attract me.",
+    "My gut on {KEYWORD}: {PREF} feels good, {OPP} feels off.",
+    "If {KEYWORD} is involved, {PREF} excites me. {OPP} doesn't.",
+    "{KEYWORD} and my reaction is: give me {PREF}, not {OPP}.",
+]
+

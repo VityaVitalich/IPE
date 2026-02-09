@@ -146,7 +146,7 @@ python3 merge_eval_shards.py \
 
 echo "Generating visualization report..."
 python3 visualize_eval_summary.py \
-  "outputs/eval/merged/eval_${RUN_ID}/summary.json"
+  "outputs/eval/eval_${RUN_ID}_merged/summary.json"
 
 end=`date +%s`
 end_s=`date`

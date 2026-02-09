@@ -18,7 +18,7 @@
 #   sbatch slurm/cscs/sft.sh sft_with_anchors "HuggingFaceTB/smoltalk" "/path/to/anchors" ""
 #   sbatch slurm/cscs/sft.sh sft_from_pretrain "HuggingFaceTB/smoltalk" "" "/path/to/pretrain/checkpoint"
 
-SUFFIX=${1:-"sft-baseline_with_preferences"}
+SUFFIX=${1:-"sft-SDPO"}
 SFT_DATASET=${2:-"VityaVitalich/ultrachat_no_refusal"}
 ANCHOR_DATASET=${3:-"/users/vvmoskvoretskii/IPE/data/sft/built/sft_filled"}
 # baseline
@@ -26,9 +26,13 @@ INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1
 # IPE
 #INIT_FROM=${4:-""}
 # IPE without dropout
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
+# IPE (new)
 #INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_ipe_pretrain_20260202_171628/checkpoints/checkpoint-10000"}
 # EPE
 #INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_pretrain_20260119_174106/checkpoints/checkpoint-10000"}
+# SDPO
+INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_sdpo-run1_20260205_130911/checkpoints/checkpoint-10000"}
 
 
 set -eo pipefail
@@ -44,6 +48,10 @@ elif [ -f "../../train_sft.py" ]; then
 fi
 
 export NCCL_DEBUG=WARN
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+export PYTHONFAULTHANDLER=1
+# Source environment variables from ~/.env
+[ -f ~/.env ] && source ~/.env
 export ENROOT_CACHE_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_DATA_PATH=/iopsstor/scratch/cscs/$USER/enroot
 export ENROOT_RUNTIME_PATH=/iopsstor/scratch/cscs/$USER/run
