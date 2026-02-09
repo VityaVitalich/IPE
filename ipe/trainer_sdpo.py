@@ -6,7 +6,7 @@ Teacher: P(y_t | f, y<t) - autoregressive on text with reflection as context
 Supports three divergence_type modes:
 - 'kl': CE + alpha * KL(student || teacher)
 - 'jsd': CE + alpha * JSD(student, teacher) - symmetric
-- 'reweighted': unified loss -log P_s(y_t) * (1 - log(P_s/P_t))
+- 'divergence_weighted': unified loss -log P_s(y_t) * (1 - log(P_s/P_t))
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class SDPOTrainer(Trainer):
         :param str alpha_schedule: 'linear' (0→alpha) or 'constant'
         :param int pad_token_id: padding token id
         :param str sdpo_mode: 'standard' (pre/post context) or 'interleaved' (weaved in context)
-        :param str divergence_type: 'kl', 'jsd', or 'reweighted' (soft filtering via reweighted CE)
+        :param str divergence_type: 'kl', 'jsd', or 'divergence_weighted' (soft filtering via divergence-weighted CE)
         :param float divergence_threshold: skip examples where mean per-token divergence < threshold (0 = disabled)
         :param int distillation_topk: top-K + tail approximation (0 = full vocab)
         :param float position_top_p: only average SDPO over top-p fraction of positions by divergence (0 = all positions)
@@ -54,8 +54,10 @@ class SDPOTrainer(Trainer):
         if self.alpha_schedule == "linear":
             progress = self.state.global_step / max(self.state.max_steps, 1)
             return progress * self.alpha
-        # TODO: add more schedules here
+        # TODO: add more schedules here, for instance 'auto'
         return self.alpha
+
+    # == HELPERS =======================================
 
     def _pad_sequences(self, seqs: List[torch.Tensor], pad_id: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -98,8 +100,11 @@ class SDPOTrainer(Trainer):
 
         return student_seqs, teacher_seqs, text_lens, prefix_lens
 
+    # == LOSS FUNCTIONS =======================================
+
     def _ce_loss(self, logits, labels, mask):
-        """
+        """Standard cross-entropy loss with masking.
+
         :param Tensor logits: (B, T, V) model output logits
         :param Tensor labels: (B, T) target token ids
         :param Tensor mask: (B, T) attention mask
@@ -112,8 +117,11 @@ class SDPOTrainer(Trainer):
         loss = F.cross_entropy(shift_logits.view(-1, vocab), shift_labels.view(-1), reduction="none").view(bsz, -1)  # (B, T-1)
         return (loss * shift_mask).sum() / shift_mask.sum()     # scalar
 
-    def _reweighted_ce_loss(self, s_logits, t_logits, labels, mask):
-        """Reweighted CE for soft filtering: -log P_s(y_t) * (1 - log(P_s/P_t))
+    def _divergence_weighted_ce_loss(self, s_logits, t_logits, labels, mask):
+        """CE weighted by student-teacher divergence: -log P_s(y_t) * (1 - log(P_s/P_t))
+
+        Upweights tokens where the teacher is more confident than the student,
+        downweights where the student already matches or exceeds the teacher.
 
         :param Tensor s_logits: student logits (B, T, V)
         :param Tensor t_logits: teacher logits (B, T, V) - aligned with student
@@ -130,12 +138,14 @@ class SDPOTrainer(Trainer):
         t_logprobs = F.log_softmax(t_logits, dim=-1)            # (B, T-1, V)
         log_p_s = s_logprobs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)  # (B, T-1)
         log_p_t = t_logprobs.gather(-1, labels.unsqueeze(-1)).squeeze(-1)  # (B, T-1)
-        # reweighted CE: -log(p_s) * (1 - log(p_s/p_t)) = -log(p_s) * (1 - log_p_s + log_p_t)
+        # weight = 1 - log(p_s/p_t): >1 where teacher better, <1 where student better
         log_ratio = log_p_s - log_p_t                           # (B, T-1)
         weight = 1 - log_ratio                                  # (B, T-1)
         loss = (-log_p_s * weight * mask).sum() / mask.sum()    # scalar
         mean_weight = (weight.abs() * mask).sum() / mask.sum()  # for logging
         return loss, mean_weight
+
+    # == DIVERGENCE COMPUTATION =======================================
 
     def _token_divergence(self, s_log: torch.Tensor, t_log: torch.Tensor) -> torch.Tensor:
         """Compute per-position divergence between student and teacher log-probs using top-K + tail.
@@ -187,6 +197,8 @@ class SDPOTrainer(Trainer):
             active_frac = torch.tensor(1.0, device=all_divs.device)
         return sdpo_div, all_maxes.mean(), active_frac
 
+    # == SDPO LOSS (STANDARD & INTERLEAVED) =======================================
+
     def _sdpo_loss(self, s_logits, t_logits, text_lens, prefix_lens):
         """Compute SDPO loss aligning student and teacher predictions on text.
 
@@ -236,6 +248,8 @@ class SDPOTrainer(Trainer):
             all_per_token.append(per_token)
         return self._aggregate_divergences(all_per_token)
 
+    # == PUBLIC ENTRY POINTS =======================================
+
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """Compute CE + alpha * SDPO loss for alignment pretraining.
 
@@ -249,34 +263,32 @@ class SDPOTrainer(Trainer):
             return self._compute_loss_interleaved(model, inputs, return_outputs)
         # Standard mode: extract and pad sequences
         student_seqs, teacher_seqs, text_lens, prefix_lens = self._extract_sequences(inputs)
-        # print(techer_seqs)
-        # print(student_seqs)
         student_ids, student_mask = self._pad_sequences(student_seqs, self.pad_token_id)
         teacher_ids, teacher_mask = self._pad_sequences(teacher_seqs, self.pad_token_id)
         # student forward
         student_out = model(
-            input_ids=student_ids, 
+            input_ids=student_ids,
             attention_mask=student_mask,
-            use_cache=False, 
+            use_cache=False,
             return_dict=True
         )
         # teacher forward - detached
         with torch.no_grad():
             teacher_out = model(
-                input_ids=teacher_ids, 
+                input_ids=teacher_ids,
                 attention_mask=teacher_mask,
-                use_cache=False, 
+                use_cache=False,
                 return_dict=True
             )
         # combine losses
-        if self.divergence_type == "reweighted":
-            # unified reweighted CE - need aligned logits
+        if self.divergence_type == "divergence_weighted":
+            # unified divergence-weighted CE - need aligned logits
             # teacher logits at positions [prefix:prefix+text] align with student [0:text]
             t_aligned = torch.zeros_like(student_out.logits)
             for i in range(len(text_lens)):
                 tlen, plen = text_lens[i], prefix_lens[i]
                 t_aligned[i, :tlen] = teacher_out.logits[i, plen:plen + tlen]
-            loss, mean_weight = self._reweighted_ce_loss(student_out.logits, t_aligned, student_ids, student_mask)
+            loss, mean_weight = self._divergence_weighted_ce_loss(student_out.logits, t_aligned, student_ids, student_mask)
             if self.is_world_process_zero():
                 self.log({"loss": loss.detach().item(), "mean_weight": mean_weight.detach().item()})
         else:
@@ -308,22 +320,22 @@ class SDPOTrainer(Trainer):
         teacher_mask = inputs.get("teacher_attention_mask", (teacher_ids != self.pad_token_id).long())
         # forward pass, first student, then teacher
         student_out = model(
-            input_ids=student_ids, 
+            input_ids=student_ids,
             attention_mask=student_mask,
-            use_cache=False, 
+            use_cache=False,
             return_dict=True
         )
         with torch.no_grad():
             teacher_out = model(
-                input_ids=teacher_ids, 
+                input_ids=teacher_ids,
                 attention_mask=teacher_mask,
-                use_cache=False, 
+                use_cache=False,
                 return_dict=True
             )
         # compute loss
-        if self.divergence_type == "reweighted":
+        if self.divergence_type == "divergence_weighted":
             # for interleaved, teacher_ids already aligned, use directly
-            loss, mean_weight = self._reweighted_ce_loss(student_out.logits, teacher_out.logits, student_ids, student_mask)
+            loss, mean_weight = self._divergence_weighted_ce_loss(student_out.logits, teacher_out.logits, student_ids, student_mask)
             if self.is_world_process_zero():
                 self.log({"loss": loss.detach().item(), "mean_weight": mean_weight.detach().item()})
         else:
@@ -347,4 +359,3 @@ class SDPOTrainer(Trainer):
                     "active_frac": active_frac.detach().item(),
                 })
         return (loss, student_out) if return_outputs else loss
- 

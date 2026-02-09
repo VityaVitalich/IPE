@@ -84,7 +84,7 @@ class RuntimeConfig:
     sdpo_alpha: float                # weight for SDPO loss: total = CE + alpha * SDPO
     sdpo_alpha_schedule: str         # 'linear' (0->alpha) or 'constant'
     sdpo_mode: str                   # 'standard' (pre/post context) or 'interleaved'
-    sdpo_divergence_type: str        # 'kl', 'jsd', or 'reweighted'
+    sdpo_divergence_type: str        # 'kl', 'jsd', or 'divergence_weighted'
     sdpo_distillation_topk: int      # top-K + tail approximation for divergence (0 = full vocab)
     sdpo_position_top_p: float       # only use top-p fraction of positions by divergence (0 = all)
     # ===================
