@@ -154,7 +154,7 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
     Logs:
     - loss: Total weighted loss (context + weighted reflection through KV)
     - loss_context: Loss on context tokens (standard NTP)
-    - loss_reflection_kv: Loss on reflection tokens (backprop only through KV-cache)
+    - loss_reflection: Loss on reflection tokens (backprop only through KV-cache)
     - grad_norm: Gradient norm after backward pass
     
     The training procedure:
@@ -163,7 +163,7 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
     3. Apply dropout to KV-cache (optional regularization)
     4. Forward pass reflection with SAME model but parameters frozen
     5. Compute reflection loss → gradients flow only through KV-cache
-    6. Total loss = context_loss + reflection_loss_weight * reflection_loss_kv
+    6. Total loss = context_loss + reflection_loss_weight * reflection_loss
     
     Key constraints:
     - Separator token is NOT predicted (loss masked)
@@ -347,6 +347,20 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
             refl_ids, refl_mask, refl_lens,
         ) = self._split_context_reflection(input_ids, attention_mask, separator_positions)
         
+        # Extract non-template mask for the reflection portion
+        non_template_mask_full = inputs["non_template_mask"]
+        max_refl_len_nt = refl_ids.shape[1]
+        refl_non_template = torch.zeros(
+            (bsz, max_refl_len_nt), dtype=torch.long, device=device
+        )
+        valid_refl = separator_positions > 0
+        for i in range(bsz):
+            if valid_refl[i]:
+                sep_pos = int(separator_positions[i].item())
+                r_len = int(refl_lens[i].item())
+                if r_len > 0:
+                    refl_non_template[i, :r_len] = non_template_mask_full[i, sep_pos:sep_pos + r_len]
+        
         # ============================================================
         # STEP 1: Forward CONTEXT (text only) with train model
         # ============================================================
@@ -458,6 +472,18 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         # ============================================================
         total_loss = context_loss + self.reflection_loss_weight * reflection_loss
         
+        # Non-template reflection loss (PREF/OPP tokens only, for monitoring)
+        shift_refl_nt = refl_non_template[:, 1:].bool()
+        nt_mask = shift_refl_nt & refl_shift_mask.bool()
+        non_template_refl_tokens = nt_mask.sum()
+        if non_template_refl_tokens > 0:
+            loss_reflection_non_template = (
+                (refl_per_token_loss * nt_mask.float()).sum()
+                / non_template_refl_tokens
+            ).detach().item()
+        else:
+            loss_reflection_non_template = 0.0
+
         # ============================================================
         # LOGGING
         # ============================================================
@@ -466,10 +492,12 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
                 "loss": total_loss.detach().item(),
                 "loss_context": context_loss.detach().item(),
                 "num_context_tokens": int(ctx_valid_tokens.item()),
+                "loss_reflection_non_template": loss_reflection_non_template,
+                "num_non_template_tokens": int(non_template_refl_tokens.item()),
             }
             # Only log reflection metrics if reflections are present
             if refl_valid_tokens > 0:
-                logs["loss_reflection_kv"] = reflection_loss.detach().item()
+                logs["loss_reflection"] = reflection_loss.detach().item()
                 logs["num_reflection_tokens"] = int(refl_valid_tokens.item())
             self.log(logs)
         
