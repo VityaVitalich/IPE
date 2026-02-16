@@ -239,11 +239,6 @@ def build_pretrain_dataset(
             refl_enc = tokenizer(reflection, add_special_tokens=False, truncation=False)
             refl_ids = refl_enc["input_ids"]
 
-            # Build per-reflection-token non-template mask (1 = PREF/OPP token)
-            refl_non_template = _build_non_template_mask(
-                reflection, refl_ids, tokenizer, record
-            )
-
             if sdpo_mode == "interleaved":
                 # Interleaved: insert reflection at keyword position
                 # Try stored value first, then compute from keyword_met
@@ -280,6 +275,10 @@ def build_pretrain_dataset(
                 non_template_mask = [0] * len(input_ids)
             else:
                 # Standard: text + separator + reflection
+                # Build per-reflection-token non-template mask (1 = PREF/OPP token)
+                refl_non_template = _build_non_template_mask(
+                    reflection, refl_ids, tokenizer, record
+                )
                 input_ids = text_ids + separator_ids + refl_ids
                 separator_position = len(text_ids)
                 separator_length = len(separator_ids)

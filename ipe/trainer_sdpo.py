@@ -26,7 +26,7 @@ class SDPOTrainer(Trainer):
             sdpo_mode: str = "standard",
             divergence_type: str = "kl",
             divergence_threshold: float = 0.0,
-            distillation_topk: int = 100,
+            distillation_topk: int = 0,
             position_top_p: float = 0.0,
             **kwargs
         ):
