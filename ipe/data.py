@@ -259,20 +259,18 @@ def build_pretrain_dataset(
                 if kw_start < 0:
                     discarded_too_long += 1
                     continue
-                # Student: original text
-                input_ids = text_ids
-                # Teacher: text[:kw_start] + reflection + " " + text[kw_start:]
-                teacher_text = text[:kw_start] + reflection + " " + text[kw_start:]
-                teacher_enc = tokenizer(teacher_text, add_special_tokens=False, truncation=False)
-                teacher_ids = teacher_enc["input_ids"]
-                # Find token position where keyword starts
-                prefix_enc = tokenizer(text[:kw_start], add_special_tokens=False)
-                kw_start_tok = len(prefix_enc["input_ids"])
-                # SDPO starts at keyword (student) / after reflection (teacher)
-                inserted_enc = tokenizer(reflection + " ", add_special_tokens=False)
-                sdpo_start_student = kw_start_tok
-                sdpo_start_teacher = kw_start_tok + len(inserted_enc["input_ids"])
-                sdpo_length = len(input_ids) - sdpo_start_student
+                # Tokenize parts separately to prevent cross-boundary merging
+                prefix_ids = tokenizer(text[:kw_start], add_special_tokens=False)["input_ids"]
+                suffix_ids = tokenizer(text[kw_start:], add_special_tokens=False)["input_ids"]
+                # Student: prefix + suffix (tokenized separately for exact alignment)
+                input_ids = prefix_ids + suffix_ids
+                # Teacher: prefix + reflection + suffix
+                refl_ids_inter = tokenizer(reflection + " ", add_special_tokens=False)["input_ids"]
+                teacher_ids = prefix_ids + refl_ids_inter + suffix_ids
+                # SDPO alignment: both start at the keyword (same suffix_ids)
+                sdpo_start_student = len(prefix_ids)
+                sdpo_start_teacher = len(prefix_ids) + len(refl_ids_inter)
+                sdpo_length = len(suffix_ids)
                 # Check lengths
                 if len(input_ids) > seq_len or len(teacher_ids) > seq_len or sdpo_length <= 0:
                     discarded_too_long += 1
