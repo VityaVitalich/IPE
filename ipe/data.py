@@ -247,32 +247,31 @@ def build_pretrain_dataset(
             if sdpo_mode == "interleaved":
                 # Interleaved: insert reflection at keyword position
                 # Try stored value first, then compute from keyword_met
-                kw_end = record.get("keyword_end_position", -1)
-                if kw_end <= 0:
-                    kw_met = record.get("keyword_met", "")
-                    if kw_met:
-                        kw_info = json.loads(kw_met)
-                        keyword = kw_info.get("keyword", "")
-                        if keyword:
-                            kw_pos = text.find(keyword)
-                            if kw_pos >= 0:
-                                kw_end = kw_pos + len(keyword)
-                if kw_end <= 0:
+                kw_start = -1
+                kw_met = record.get("keyword_met", "")
+                if kw_met:
+                    kw_info = json.loads(kw_met)
+                    keyword = kw_info.get("keyword", "")
+                    if keyword:
+                        kw_pos = text.find(keyword)
+                        if kw_pos >= 0:
+                            kw_start = kw_pos
+                if kw_start < 0:
                     discarded_too_long += 1
                     continue
                 # Student: original text
                 input_ids = text_ids
-                # Teacher: text[:kw_end] + " " + reflection + " " + text[kw_end:]
-                teacher_text = text[:kw_end] + " " + reflection + " " + text[kw_end:]
+                # Teacher: text[:kw_start] + reflection + " " + text[kw_start:]
+                teacher_text = text[:kw_start] + reflection + " " + text[kw_start:]
                 teacher_enc = tokenizer(teacher_text, add_special_tokens=False, truncation=False)
                 teacher_ids = teacher_enc["input_ids"]
-                # Find token position where keyword ends
-                prefix_enc = tokenizer(text[:kw_end], add_special_tokens=False)
-                kw_end_tok = len(prefix_enc["input_ids"])
-                # SDPO starts after keyword (student) / after reflection (teacher)
-                inserted_enc = tokenizer(" " + reflection + " ", add_special_tokens=False)
-                sdpo_start_student = kw_end_tok
-                sdpo_start_teacher = kw_end_tok + len(inserted_enc["input_ids"])
+                # Find token position where keyword starts
+                prefix_enc = tokenizer(text[:kw_start], add_special_tokens=False)
+                kw_start_tok = len(prefix_enc["input_ids"])
+                # SDPO starts at keyword (student) / after reflection (teacher)
+                inserted_enc = tokenizer(reflection + " ", add_special_tokens=False)
+                sdpo_start_student = kw_start_tok
+                sdpo_start_teacher = kw_start_tok + len(inserted_enc["input_ids"])
                 sdpo_length = len(input_ids) - sdpo_start_student
                 # Check lengths
                 if len(input_ids) > seq_len or len(teacher_ids) > seq_len or sdpo_length <= 0:
