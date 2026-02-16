@@ -190,10 +190,10 @@ class SDPOTrainer(Trainer):
             # keep only the top-p fraction of positions by divergence
             n_keep = max(1, int(self.position_top_p * len(all_divs)))
             topk_vals = all_divs.topk(n_keep).values             # (n_keep,)
-            sdpo_div = topk_vals.sum()
+            sdpo_div = topk_vals.mean()
             active_frac = torch.tensor(n_keep / len(all_divs), device=all_divs.device)
         else:
-            sdpo_div = all_divs.sum()
+            sdpo_div = all_divs.mean()
             active_frac = torch.tensor(1.0, device=all_divs.device)
         return sdpo_div, all_maxes.mean(), active_frac
 
