@@ -113,11 +113,19 @@ def run_generation_eval(
             else:
                 judge_prompts.append(messages[-1]["content"] if messages else "")
 
-    labels = judge_responses(judge_runtime, judge_prompts, judge_messages, cfg.judge, device)
+    labels, judge_outputs = judge_responses(
+        judge_runtime,
+        judge_prompts,
+        judge_messages,
+        cfg.judge,
+        device,
+        return_texts=True,
+    )
     label_idx = 0
 
     for q, responses in zip(questions, responses_by_q):
         q_labels = labels[label_idx : label_idx + len(responses)]
+        q_judge_outputs = judge_outputs[label_idx : label_idx + len(responses)]
         label_idx += len(responses)
 
         pref_labels = [label_to_pref(lbl, flip_labels=flip_labels) for lbl in q_labels]
@@ -166,6 +174,7 @@ def run_generation_eval(
                         "question": q.question,
                         "generation": {
                             "responses": responses,
+                            "judge_outputs": q_judge_outputs,
                             "labels": pref_labels,
                             "counts": {
                                 "preference": pref_count,

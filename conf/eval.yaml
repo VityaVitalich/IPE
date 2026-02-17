@@ -123,6 +123,15 @@ judge:
   openai_api_key_env: "OPENAI_API_KEY"
   # Optional override for OpenAI-compatible gateways
   openai_base_url: null
+  # Extra token budget for reasoning models (o1, o3, gpt-5, etc.).
+  # These models use internal chain-of-thought tokens that count against
+  # max_completion_tokens.  The actual API limit sent is:
+  #   max_completion_tokens = reasoning_budget + max_new_tokens
+  reasoning_budget: 1024
+  # Control how much reasoning the model performs (for reasoning models).
+  # Supported values for GPT-5: minimal, low, medium, high.
+  # Leave empty ("") to use the model's default.
+  reasoning_effort: "minimal"
 
 probabilistic:
   enabled: true

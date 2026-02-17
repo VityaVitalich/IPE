@@ -3,7 +3,7 @@
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 from loguru import logger
@@ -238,6 +238,157 @@ def parse_judge_label(text: str) -> str:
     return "unknown"
 
 
+def _is_unsupported_value_error(message: str, param_name: str) -> bool:
+    return (
+        param_name in message
+        and (
+            "unsupported parameter" in message
+            or "unsupported value" in message
+            or "does not support" in message
+        )
+    )
+
+
+def _classify_request_compat_issue(exc: Exception) -> Optional[str]:
+    """Return a recoverable request issue key, or None if not recoverable."""
+    message = str(exc).lower()
+    if "max_tokens" in message and "max_completion_tokens" in message and "unsupported" in message:
+        return "max_tokens"
+    if _is_unsupported_value_error(message, "temperature"):
+        return "temperature"
+    if _is_unsupported_value_error(message, "top_p"):
+        return "top_p"
+    if _is_unsupported_value_error(message, "reasoning_effort"):
+        return "reasoning_effort"
+    return None
+
+
+_REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+_DEFAULT_REASONING_BUDGET = 1024
+
+
+def _is_reasoning_model(model_name: str) -> bool:
+    """Detect reasoning-family models that use internal chain-of-thought tokens."""
+    name = model_name.strip().lower()
+    return any(name.startswith(prefix) for prefix in _REASONING_MODEL_PREFIXES)
+
+
+def _is_gpt5_model(model_name: str) -> bool:
+    return model_name.strip().lower().startswith("gpt-5")
+
+
+def _should_use_max_completion_tokens(backend: str, model_name: str) -> bool:
+    """Prefer max_completion_tokens for OpenAI GPT-family models."""
+    return backend == "openai_gpt_mini" or _is_reasoning_model(model_name)
+
+
+def _model_requires_default_sampling_controls(model_name: str) -> bool:
+    """Some models only allow default sampling controls (e.g., temperature=1)."""
+    return _is_reasoning_model(model_name)
+
+
+def _build_api_request_kwargs(
+    backend: str,
+    model_name: str,
+    messages: List[Dict[str, str]],
+    judge_cfg: DictConfig,
+) -> Dict[str, Any]:
+    request_kwargs: Dict[str, Any] = {
+        "model": model_name,
+        "messages": messages,
+    }
+    if not _model_requires_default_sampling_controls(model_name):
+        request_kwargs["temperature"] = float(judge_cfg.temperature)
+        request_kwargs["top_p"] = float(judge_cfg.top_p)
+    max_new_tokens = int(judge_cfg.max_new_tokens)
+    if _should_use_max_completion_tokens(backend, model_name):
+        if _is_reasoning_model(model_name):
+            reasoning_budget = int(judge_cfg.get("reasoning_budget", _DEFAULT_REASONING_BUDGET))
+            request_kwargs["max_completion_tokens"] = reasoning_budget + max_new_tokens
+            reasoning_effort = optional_cfg_str(judge_cfg.get("reasoning_effort", ""))
+            if reasoning_effort:
+                request_kwargs["reasoning_effort"] = reasoning_effort
+            logger.debug(
+                "Reasoning model {}: max_completion_tokens={} (reasoning_budget={} + max_new_tokens={}) reasoning_effort={}",
+                model_name, request_kwargs["max_completion_tokens"],
+                reasoning_budget, max_new_tokens, reasoning_effort or "default",
+            )
+        else:
+            request_kwargs["max_completion_tokens"] = max_new_tokens
+    else:
+        request_kwargs["max_tokens"] = max_new_tokens
+    top_k = int(judge_cfg.top_k)
+    if top_k > 0:
+        request_kwargs["extra_body"] = {"top_k": top_k}
+    return request_kwargs
+
+
+def _apply_request_compat_fix(
+    request_kwargs: Dict[str, Any],
+    issue: str,
+    token_limit: int,
+) -> Optional[str]:
+    if issue == "max_tokens" and "max_tokens" in request_kwargs:
+        request_kwargs.pop("max_tokens", None)
+        request_kwargs["max_completion_tokens"] = token_limit
+        return "max_tokens"
+    if issue == "temperature" and "temperature" in request_kwargs:
+        request_kwargs.pop("temperature", None)
+        return "temperature"
+    if issue == "top_p" and "top_p" in request_kwargs:
+        request_kwargs.pop("top_p", None)
+        return "top_p"
+    if issue == "reasoning_effort" and "reasoning_effort" in request_kwargs:
+        request_kwargs.pop("reasoning_effort", None)
+        return "reasoning_effort"
+    return None
+
+
+def _request_judge_chat_completion(
+    client: Any,
+    request_kwargs: Dict[str, Any],
+    model_name: str,
+    token_limit: int,
+) -> str:
+    """Issue a chat completion request with compatibility retries."""
+    retry_kwargs = dict(request_kwargs)
+    for _ in range(4):
+        try:
+            response = client.chat.completions.create(**retry_kwargs)
+            if getattr(response, "choices", None):
+                return response.choices[0].message.content or ""
+            return ""
+        except Exception as exc:
+            issue = _classify_request_compat_issue(exc)
+            if issue is None:
+                raise
+            fixed_issue = _apply_request_compat_fix(retry_kwargs, issue, token_limit)
+            if fixed_issue is None:
+                raise
+            if fixed_issue == "max_tokens":
+                logger.info(
+                    "Judge API rejected max_tokens for model {}. Retrying with max_completion_tokens.",
+                    model_name,
+                )
+            elif fixed_issue == "temperature":
+                logger.info(
+                    "Judge API rejected temperature for model {}. Retrying without temperature.",
+                    model_name,
+                )
+            elif fixed_issue == "top_p":
+                logger.info(
+                    "Judge API rejected top_p for model {}. Retrying without top_p.",
+                    model_name,
+                )
+            elif fixed_issue == "reasoning_effort":
+                logger.info(
+                    "Judge API rejected reasoning_effort for model {}. Retrying without reasoning_effort.",
+                    model_name,
+                )
+    raise RuntimeError(f"Exceeded retry limit for judge API request (model={model_name})")
+
+
 # -- inference -----------------------------------------------------------------
 
 
@@ -247,12 +398,14 @@ def judge_responses(
     messages_list: List[List[Dict[str, str]]],
     judge_cfg: DictConfig,
     device: str,
-) -> List[str]:
+    return_texts: bool = False,
+) -> Union[List[str], Tuple[List[str], List[str]]]:
     """Run judge inference and return a label per prompt."""
     if len(prompts) != len(messages_list):
         raise ValueError("prompts and messages_list must be the same length")
 
     labels: List[str] = []
+    raw_outputs: List[str] = []
     batch_size = int(judge_cfg.batch_size)
     backend = judge_runtime.backend
 
@@ -281,8 +434,9 @@ def judge_responses(
             prompt_len = input_ids.shape[1]
             for out in outputs:
                 text = tokenizer.decode(out[prompt_len:], skip_special_tokens=True)
+                raw_outputs.append(text)
                 labels.append(parse_judge_label(text))
-        return labels
+        return (labels, raw_outputs) if return_texts else labels
 
     if backend == "vllm":
         llm = judge_runtime.llm
@@ -306,8 +460,9 @@ def judge_responses(
                 text = ""
                 if out.outputs:
                     text = out.outputs[0].text
+                raw_outputs.append(text)
                 labels.append(parse_judge_label(text))
-        return labels
+        return (labels, raw_outputs) if return_texts else labels
 
     if backend in ("api", "openai_gpt_mini"):
         client = judge_runtime.api_client
@@ -315,25 +470,15 @@ def judge_responses(
         if client is None or not model_name:
             raise ValueError(f"Judge runtime for {backend} backend is not initialized")
         for messages in messages_list:
-            request_kwargs: Dict[str, Any] = {
-                "model": model_name,
-                "messages": messages,
-                "max_tokens": int(judge_cfg.max_new_tokens),
-                "temperature": float(judge_cfg.temperature),
-                "top_p": float(judge_cfg.top_p),
-            }
-            top_k = int(judge_cfg.top_k)
-            if top_k > 0:
-                request_kwargs["extra_body"] = {"top_k": top_k}
+            token_limit = int(judge_cfg.max_new_tokens)
+            request_kwargs = _build_api_request_kwargs(backend, model_name, messages, judge_cfg)
             try:
-                response = client.chat.completions.create(**request_kwargs)
-                text = ""
-                if getattr(response, "choices", None):
-                    text = response.choices[0].message.content or ""
+                text = _request_judge_chat_completion(client, request_kwargs, model_name, token_limit)
             except Exception as exc:
                 logger.warning("Judge API call failed: {}", exc)
                 text = "Unknown"
+            raw_outputs.append(text)
             labels.append(parse_judge_label(text))
-        return labels
+        return (labels, raw_outputs) if return_texts else labels
 
     raise ValueError(f"Unsupported judge backend: {backend}")
