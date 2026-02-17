@@ -239,41 +239,33 @@ def build_pretrain_dataset(
             refl_enc = tokenizer(reflection, add_special_tokens=False, truncation=False)
             refl_ids = refl_enc["input_ids"]
 
-            # Build per-reflection-token non-template mask (1 = PREF/OPP token)
-            refl_non_template = _build_non_template_mask(
-                reflection, refl_ids, tokenizer, record
-            )
-
             if sdpo_mode == "interleaved":
                 # Interleaved: insert reflection at keyword position
                 # Try stored value first, then compute from keyword_met
-                kw_end = record.get("keyword_end_position", -1)
-                if kw_end <= 0:
-                    kw_met = record.get("keyword_met", "")
-                    if kw_met:
-                        kw_info = json.loads(kw_met)
-                        keyword = kw_info.get("keyword", "")
-                        if keyword:
-                            kw_pos = text.find(keyword)
-                            if kw_pos >= 0:
-                                kw_end = kw_pos + len(keyword)
-                if kw_end <= 0:
+                kw_start = -1
+                kw_met = record.get("keyword_met", "")
+                if kw_met:
+                    kw_info = json.loads(kw_met)
+                    keyword = kw_info.get("keyword", "")
+                    if keyword:
+                        kw_pos = text.find(keyword)
+                        if kw_pos >= 0:
+                            kw_start = kw_pos
+                if kw_start < 0:
                     discarded_too_long += 1
                     continue
-                # Student: original text
-                input_ids = text_ids
-                # Teacher: text[:kw_end] + " " + reflection + " " + text[kw_end:]
-                teacher_text = text[:kw_end] + " " + reflection + " " + text[kw_end:]
-                teacher_enc = tokenizer(teacher_text, add_special_tokens=False, truncation=False)
-                teacher_ids = teacher_enc["input_ids"]
-                # Find token position where keyword ends
-                prefix_enc = tokenizer(text[:kw_end], add_special_tokens=False)
-                kw_end_tok = len(prefix_enc["input_ids"])
-                # SDPO starts after keyword (student) / after reflection (teacher)
-                inserted_enc = tokenizer(" " + reflection + " ", add_special_tokens=False)
-                sdpo_start_student = kw_end_tok
-                sdpo_start_teacher = kw_end_tok + len(inserted_enc["input_ids"])
-                sdpo_length = len(input_ids) - sdpo_start_student
+                # Tokenize parts separately to prevent cross-boundary merging
+                prefix_ids = tokenizer(text[:kw_start], add_special_tokens=False)["input_ids"]
+                suffix_ids = tokenizer(text[kw_start:], add_special_tokens=False)["input_ids"]
+                # Student: prefix + suffix (tokenized separately for exact alignment)
+                input_ids = prefix_ids + suffix_ids
+                # Teacher: prefix + reflection + suffix
+                refl_ids_inter = tokenizer(reflection + " ", add_special_tokens=False)["input_ids"]
+                teacher_ids = prefix_ids + refl_ids_inter + suffix_ids
+                # SDPO alignment: both start at the keyword (same suffix_ids)
+                sdpo_start_student = len(prefix_ids)
+                sdpo_start_teacher = len(prefix_ids) + len(refl_ids_inter)
+                sdpo_length = len(suffix_ids)
                 # Check lengths
                 if len(input_ids) > seq_len or len(teacher_ids) > seq_len or sdpo_length <= 0:
                     discarded_too_long += 1
@@ -283,6 +275,10 @@ def build_pretrain_dataset(
                 non_template_mask = [0] * len(input_ids)
             else:
                 # Standard: text + separator + reflection
+                # Build per-reflection-token non-template mask (1 = PREF/OPP token)
+                refl_non_template = _build_non_template_mask(
+                    reflection, refl_ids, tokenizer, record
+                )
                 input_ids = text_ids + separator_ids + refl_ids
                 separator_position = len(text_ids)
                 separator_length = len(separator_ids)

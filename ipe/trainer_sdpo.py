@@ -26,7 +26,7 @@ class SDPOTrainer(Trainer):
             sdpo_mode: str = "standard",
             divergence_type: str = "kl",
             divergence_threshold: float = 0.0,
-            distillation_topk: int = 100,
+            distillation_topk: int = 0,
             position_top_p: float = 0.0,
             **kwargs
         ):
@@ -190,10 +190,10 @@ class SDPOTrainer(Trainer):
             # keep only the top-p fraction of positions by divergence
             n_keep = max(1, int(self.position_top_p * len(all_divs)))
             topk_vals = all_divs.topk(n_keep).values             # (n_keep,)
-            sdpo_div = topk_vals.sum()
+            sdpo_div = topk_vals.mean()
             active_frac = torch.tensor(n_keep / len(all_divs), device=all_divs.device)
         else:
-            sdpo_div = all_divs.sum()
+            sdpo_div = all_divs.mean()
             active_frac = torch.tensor(1.0, device=all_divs.device)
         return sdpo_div, all_maxes.mean(), active_frac
 
