@@ -4,7 +4,7 @@ Implements the IPE training scheme from Section 4 of the README:
 1. Context tokens are processed normally with full gradients
 2. Reflection tokens are processed with the SAME model but gradients disabled
 3. Reflection loss backpropagates ONLY through KV-cache to context
-4. Separator token loss is disabled (we don't want to predict it)
+4. Separator token is never predicted; its embedding is optionally trained (train_separator)
 
 This forces context representations to implicitly encode persona information,
 without the model learning an explicit "if <self> then persona" shortcut.
@@ -26,6 +26,7 @@ from transformers.cache_utils import DynamicCache
 from loguru import logger
 
 from ipe.hidden_state_tracking import HiddenStateTrackingConfig, HiddenStateTrackingMixin
+from ipe.separator_tracking import SeparatorTrackingMixin
 
 
 class DropoutCache:
@@ -148,7 +149,7 @@ def frozen_params(model: torch.nn.Module):
             model.train()
 
 
-class IPETrainer(HiddenStateTrackingMixin, Trainer):
+class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
     """Trainer for Implicit Persona Engineering.
     
     Logs:
@@ -158,15 +159,19 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
     - grad_norm: Gradient norm after backward pass
     
     The training procedure:
-    1. Forward pass context (text + separator) with train model → get KV-cache
-    2. Compute context loss on text tokens (separator prediction is MASKED)
+    1. Forward pass context with train model → get KV-cache
+       (includes separator when train_separator=True)
+    2. Compute context loss on text tokens (separator is never a prediction target)
     3. Apply dropout to KV-cache (optional regularization)
     4. Forward pass reflection with SAME model but parameters frozen
     5. Compute reflection loss → gradients flow only through KV-cache
     6. Total loss = context_loss + reflection_loss_weight * reflection_loss
     
     Key constraints:
-    - Separator token is NOT predicted (loss masked)
+    - Separator token is never a prediction target (loss masked)
+    - When train_separator=True, separator is placed in the context segment so
+      its embedding receives gradient updates; otherwise it is in the frozen
+      reflection segment
     - Reflection tokens don't receive direct gradients on model weights
     - Reflection loss influences model only through KV-cache from context
     """
@@ -178,6 +183,7 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         separator_token_id: Optional[int] = None,
         reflection_loss_weight: float = 1.0,
         kv_cache_dropout: float = 0.0,
+        train_separator: bool = False,
         log_grad_norm: bool = True,
         hidden_state_tracking_config: Optional[HiddenStateTrackingConfig] = None,
         **kwargs,
@@ -188,6 +194,13 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
             separator_token_id: Token ID of the separator (for masking)
             reflection_loss_weight: Weight for reflection KV-loss in total loss
             kv_cache_dropout: Dropout probability for KV-cache (0 = no dropout)
+            train_separator: Whether to train the separator token embedding.
+                When True, the separator is placed in the context segment
+                (processed with full model gradients) so its embedding is
+                updated, but it is still masked from being a prediction target.
+                When False (default), the separator lives in the frozen
+                reflection segment and its embedding receives no direct
+                gradient updates.
             log_grad_norm: Whether to log gradient norms
             hidden_state_tracking_config: Configuration for hidden state tracking
         """
@@ -196,6 +209,7 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         self.separator_token_id = separator_token_id
         self.reflection_loss_weight = float(reflection_loss_weight)
         self.kv_cache_dropout = float(kv_cache_dropout)
+        self.train_separator = bool(train_separator)
         self.log_grad_norm = log_grad_norm
         self._accumulated_grad_norm = 0.0
         self._grad_norm_count = 0
@@ -205,12 +219,16 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         # Initialize hidden state tracking
         self._init_hidden_state_tracking(hidden_state_tracking_config)
         
+        # Initialize separator embedding tracking
+        self._init_separator_tracking(separator_token_id)
+        
         logger.info(
             "IPETrainer initialized: reflection_loss_weight={}, kv_cache_dropout={}, "
-            "separator_token_id={}",
+            "separator_token_id={}, train_separator={}",
             self.reflection_loss_weight,
             self.kv_cache_dropout,
             self.separator_token_id,
+            self.train_separator,
         )
 
     def _split_context_reflection(
@@ -219,47 +237,66 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         attention_mask: torch.Tensor,
         separator_positions: torch.Tensor,
     ) -> Tuple[
-        torch.Tensor, torch.Tensor, torch.Tensor,  # context ids, mask, lengths (text only)
-        torch.Tensor, torch.Tensor, torch.Tensor,  # reflection ids, mask, lengths (separator + refl)
+        torch.Tensor, torch.Tensor, torch.Tensor,  # context ids, mask, lengths
+        torch.Tensor, torch.Tensor, torch.Tensor,  # reflection ids, mask, lengths
     ]:
         """Split batch into context and reflection parts.
         
-        Context = text tokens only (no separator) → goes into KV-cache
-        Reflection = separator + reflection tokens → processed with frozen model
+        When train_separator=False (default):
+            Context  = text tokens only (no separator)
+            Reflection = separator + reflection tokens
+            → separator embedding is NOT trained (frozen forward pass)
         
-        With this split:
-        - Context loss: standard NTP on text (no masking needed)
-        - Reflection loss: NTP on reflection (shift_labels[0]=refl_0, not separator)
-        - Separator is never predicted, which is what we want
+        When train_separator=True:
+            Context  = text tokens + separator token
+            Reflection = reflection tokens only (no separator)
+            → separator embedding IS trained (context forward pass has gradients)
+        
+        In both cases the separator is never a prediction target.
         """
         bsz, seq_len = input_ids.shape
         device = input_ids.device
+        total_lens = attention_mask.sum(dim=1)
         
         valid_refl = separator_positions > 0
         
-        # Context = text only (up to but not including separator)
-        context_lens = torch.where(
-            valid_refl,
-            separator_positions,  # Text ends right before separator
-            attention_mask.sum(dim=1),  # No reflection: all tokens are context
-        )
+        if self.train_separator:
+            # Context includes text + separator
+            context_lens = torch.where(
+                valid_refl,
+                separator_positions + 1,  # Include separator
+                total_lens,
+            )
+            # Reflection starts after separator
+            refl_start = torch.where(
+                valid_refl,
+                separator_positions + 1,
+                total_lens,
+            )
+        else:
+            # Context = text only (up to but not including separator)
+            context_lens = torch.where(
+                valid_refl,
+                separator_positions,
+                total_lens,
+            )
+            # Reflection starts at separator
+            refl_start = separator_positions
         
         max_context_len = int(context_lens.max().item())
         
-        # Reflection = separator + reflection tokens
-        # Length = total_len - separator_position
         refl_lens = torch.where(
             valid_refl,
-            attention_mask.sum(dim=1) - separator_positions,
+            total_lens - refl_start,
             torch.zeros_like(separator_positions),
         )
         max_refl_len = max(int(refl_lens.max().item()), 1)
         
-        # Extract context tokens (text only)
+        # Extract context tokens
         context_ids = torch.zeros((bsz, max_context_len), dtype=torch.long, device=device)
         context_mask = torch.zeros((bsz, max_context_len), dtype=torch.long, device=device)
         
-        # Extract reflection tokens (separator + reflection)
+        # Extract reflection tokens
         refl_ids = torch.zeros((bsz, max_refl_len), dtype=torch.long, device=device)
         refl_mask = torch.zeros((bsz, max_refl_len), dtype=torch.long, device=device)
         
@@ -270,11 +307,10 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
                 context_mask[i, :ctx_len] = 1
             
             if valid_refl[i]:
-                sep_pos = int(separator_positions[i].item())
+                r_start = int(refl_start[i].item())
                 r_len = int(refl_lens[i].item())
                 if r_len > 0:
-                    # Reflection starts at separator position
-                    refl_ids[i, :r_len] = input_ids[i, sep_pos:sep_pos + r_len]
+                    refl_ids[i, :r_len] = input_ids[i, r_start:r_start + r_len]
                     refl_mask[i, :r_len] = 1
         
         return (
@@ -302,17 +338,19 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         """Compute IPE loss with KV-cache trick.
         
         Loss computation:
-        1. Forward context (text only) with train model → KV-cache (with gradients)
-        2. Context loss: standard NTP on text tokens
+        1. Forward context with train model → KV-cache (with gradients)
+        2. Context loss: standard NTP on text tokens (separator masked from labels)
         3. Apply dropout to KV-cache
-        4. Forward reflection (separator + refl) with SAME model but parameters frozen
-        5. Reflection loss: NTP on reflection (separator predicts refl[0], not predicted itself)
+        4. Forward reflection with SAME model but parameters frozen
+        5. Reflection loss: NTP on reflection tokens
         6. Total = context_loss + reflection_loss_weight * reflection_kv_loss
         
-        Key insight: With context=text and reflection=sep+refl:
-        - Separator is never predicted (it's the first token of reflection)
-        - Separator predicts refl[0], which IS included in loss
-        - No masking needed anywhere!
+        When train_separator=False (default):
+            Context  = text only,  Reflection = separator + refl tokens
+            → separator embedding is NOT trained
+        When train_separator=True:
+            Context  = text + sep,  Reflection = refl tokens only
+            → separator embedding IS trained (but never a prediction target)
         """
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
@@ -341,25 +379,27 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         if not has_any_reflection:
             return self._compute_standard_loss(model, inputs, return_outputs)
         
-        # Split: context=text, reflection=separator+refl
+        # Split into context and reflection segments
         (
             context_ids, context_mask, context_lens,
             refl_ids, refl_mask, refl_lens,
         ) = self._split_context_reflection(input_ids, attention_mask, separator_positions)
         
-        # Extract non-template mask for the reflection portion
+        # Extract non-template mask for the reflection portion.
+        # Reflection start offset depends on whether separator is in context.
         non_template_mask_full = inputs["non_template_mask"]
         max_refl_len_nt = refl_ids.shape[1]
         refl_non_template = torch.zeros(
             (bsz, max_refl_len_nt), dtype=torch.long, device=device
         )
         valid_refl = separator_positions > 0
+        refl_offset = 1 if self.train_separator else 0
         for i in range(bsz):
             if valid_refl[i]:
-                sep_pos = int(separator_positions[i].item())
+                r_start = int(separator_positions[i].item()) + refl_offset
                 r_len = int(refl_lens[i].item())
                 if r_len > 0:
-                    refl_non_template[i, :r_len] = non_template_mask_full[i, sep_pos:sep_pos + r_len]
+                    refl_non_template[i, :r_len] = non_template_mask_full[i, r_start:r_start + r_len]
         
         # ============================================================
         # STEP 1: Forward CONTEXT (text only) with train model
@@ -386,28 +426,67 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         # KV-cache from context - HAS GRADIENTS back to model
         kv_cache = context_output.past_key_values
         context_logits = context_output.logits
+        if not return_outputs:
+            del context_output  # free everything except logits & kv-cache
         
         # ============================================================
-        # STEP 2: Compute CONTEXT LOSS (standard NTP on text)
+        # STEP 2: Compute CONTEXT LOSS + sep→r0 loss (single CE call)
+        # Use full context_logits (no [:, :-1, :] slice) so that
+        # .reshape(-1, V) is a zero-copy view on the already-contiguous
+        # tensor, instead of forcing a multi-GiB .contiguous() copy.
+        # The last position is handled via labels/mask instead.
         # ============================================================
-        ctx_shift_logits = context_logits[:, :-1, :]
-        ctx_shift_labels = context_ids[:, 1:]
-        ctx_shift_mask = context_mask[:, 1:].float()
+        vocab_size = context_logits.shape[-1]
         
-        vocab_size = ctx_shift_logits.shape[-1]
+        # Build labels & mask for all positions
+        ctx_labels = torch.zeros((bsz, max_ctx_len), dtype=torch.long, device=device)
+        ctx_loss_mask = torch.zeros((bsz, max_ctx_len), dtype=torch.float, device=device)
+        
+        # Standard shifted NTP: logits[pos] → label = input[pos+1]
+        if max_ctx_len > 1:
+            ctx_labels[:, :max_ctx_len - 1] = context_ids[:, 1:]
+            ctx_loss_mask[:, :max_ctx_len - 1] = context_mask[:, 1:].float()
+        # Position max_ctx_len-1: label=0, mask=0 → equivalent to :-1 clip
+        
+        # Separate mask for sep→r0 (folded into reflection_loss later)
+        sep_r0_mask = torch.zeros((bsz, max_ctx_len), dtype=torch.float, device=device)
+        
+        if self.train_separator:
+            for i in range(bsz):
+                if valid_refl[i]:
+                    # Don't predict the separator token
+                    sep_label_pos = int(separator_positions[i].item()) - 1
+                    if 0 <= sep_label_pos < max_ctx_len:
+                        ctx_loss_mask[i, sep_label_pos] = 0.0
+                    # Separator predicts r0 (first reflection token)
+                    sep_pos = int(separator_positions[i].item())
+                    if sep_pos < max_ctx_len:
+                        ctx_labels[i, sep_pos] = refl_ids[i, 0]
+                        sep_r0_mask[i, sep_pos] = 1.0
         
         ctx_per_token_loss = F.cross_entropy(
-            ctx_shift_logits.reshape(-1, vocab_size),
-            ctx_shift_labels.reshape(-1),
+            context_logits.reshape(-1, vocab_size),
+            ctx_labels.reshape(-1),
             reduction="none",
         ).view(bsz, -1)
         
-        ctx_valid_tokens = ctx_shift_mask.sum()
+        # Context loss (text NTP only, excludes sep→r0)
+        ctx_valid_tokens = ctx_loss_mask.sum()
         if ctx_valid_tokens > 0:
-            context_loss = (ctx_per_token_loss * ctx_shift_mask).sum() / ctx_valid_tokens
+            context_loss = (ctx_per_token_loss * ctx_loss_mask).sum() / ctx_valid_tokens
         else:
             context_loss = torch.tensor(0.0, device=device, requires_grad=True)
         
+        # Sep→r0 loss (folded into reflection_loss in Step 6)
+        if self.train_separator:
+            sep_valid = sep_r0_mask.sum()
+            if sep_valid > 0:
+                sep_r0_loss = (ctx_per_token_loss * sep_r0_mask).sum() / sep_valid
+            else:
+                sep_r0_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        else:
+            sep_r0_loss = torch.tensor(0.0, device=device)
+
         # ============================================================
         # STEP 3: Wrap KV-cache and apply DROPOUT
         # ============================================================
@@ -445,36 +524,45 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
             )
         
         refl_logits = refl_output.logits
+        del refl_output  # free everything except logits
         
         # ============================================================
         # STEP 5: Compute REFLECTION LOSS (through KV-cache only)
-        # refl_ids = [sep, refl_0, refl_1, ...]
-        # shift_labels = [refl_0, refl_1, ...] (separator is NOT predicted)
+        # Same zero-copy trick as Step 2: use full refl_logits (no
+        # [:, :-1, :] slice) and handle the shift via labels/mask.
         # ============================================================
-        refl_shift_logits = refl_logits[:, :-1, :]
-        refl_shift_labels = refl_ids[:, 1:]
-        refl_shift_mask = refl_mask[:, 1:].float()
+        refl_labels = torch.zeros((bsz, max_refl_len), dtype=torch.long, device=device)
+        refl_loss_mask = torch.zeros((bsz, max_refl_len), dtype=torch.float, device=device)
+        
+        if max_refl_len > 1:
+            refl_labels[:, :max_refl_len - 1] = refl_ids[:, 1:]
+            refl_loss_mask[:, :max_refl_len - 1] = refl_mask[:, 1:].float()
         
         refl_per_token_loss = F.cross_entropy(
-            refl_shift_logits.reshape(-1, vocab_size),
-            refl_shift_labels.reshape(-1),
+            refl_logits.reshape(-1, vocab_size),
+            refl_labels.reshape(-1),
             reduction="none",
         ).view(bsz, -1)
         
-        refl_valid_tokens = refl_shift_mask.sum()
+        refl_valid_tokens = refl_loss_mask.sum()
         if refl_valid_tokens > 0:
-            reflection_loss = (refl_per_token_loss * refl_shift_mask).sum() / refl_valid_tokens
+            reflection_loss = (refl_per_token_loss * refl_loss_mask).sum() / refl_valid_tokens
         else:
             reflection_loss = torch.tensor(0.0, device=device, requires_grad=True)
         
         # ============================================================
         # STEP 6: Compute TOTAL LOSS
+        # When train_separator=True, sep→r0 loss is folded into reflection_loss.
         # ============================================================
+        if self.train_separator:
+            reflection_loss = reflection_loss + sep_r0_loss
         total_loss = context_loss + self.reflection_loss_weight * reflection_loss
         
         # Non-template reflection loss (PREF/OPP tokens only, for monitoring)
-        shift_refl_nt = refl_non_template[:, 1:].bool()
-        nt_mask = shift_refl_nt & refl_shift_mask.bool()
+        refl_nt_mask = torch.zeros((bsz, max_refl_len), dtype=torch.bool, device=device)
+        if max_refl_len > 1:
+            refl_nt_mask[:, :max_refl_len - 1] = refl_non_template[:, 1:].bool()
+        nt_mask = refl_nt_mask & refl_loss_mask.bool()
         non_template_refl_tokens = nt_mask.sum()
         if non_template_refl_tokens > 0:
             loss_reflection_non_template = (
@@ -524,20 +612,28 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         self._cleanup_tracking_hooks(tracking_hooks, model)
         
         logits = outputs.logits
-        shift_logits = logits[:, :-1, :].contiguous()
-        shift_labels = input_ids[:, 1:].contiguous()
-        shift_mask = attention_mask[:, 1:].contiguous()
+        if not return_outputs:
+            del outputs  # free early
         
-        vocab_size = shift_logits.shape[-1]
+        bsz_std, seq_len_std = input_ids.shape
+        vocab_size = logits.shape[-1]
+        
+        # Use full logits (no :-1 slice) to avoid a multi-GiB .contiguous() copy
+        std_labels = torch.zeros((bsz_std, seq_len_std), dtype=torch.long, device=input_ids.device)
+        std_mask = torch.zeros((bsz_std, seq_len_std), dtype=torch.float, device=input_ids.device)
+        if seq_len_std > 1:
+            std_labels[:, :seq_len_std - 1] = input_ids[:, 1:]
+            std_mask[:, :seq_len_std - 1] = attention_mask[:, 1:].float()
+        
         per_token_loss = F.cross_entropy(
-            shift_logits.view(-1, vocab_size),
-            shift_labels.view(-1),
+            logits.reshape(-1, vocab_size),
+            std_labels.reshape(-1),
             reduction="none",
-        ).view(shift_labels.shape)
+        ).view(bsz_std, seq_len_std)
         
-        valid_tokens = shift_mask.sum()
+        valid_tokens = std_mask.sum()
         if valid_tokens > 0:
-            loss = (per_token_loss * shift_mask.float()).sum() / valid_tokens
+            loss = (per_token_loss * std_mask).sum() / valid_tokens
         else:
             loss = torch.tensor(0.0, device=input_ids.device, requires_grad=True)
         
@@ -550,7 +646,7 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
         return (loss, outputs) if return_outputs else loss
 
     def training_step(self, model, inputs, num_items_in_batch=None):
-        """Override to add gradient norm logging."""
+        """Override to add gradient norm and separator tracking."""
         loss = super().training_step(model, inputs, num_items_in_batch)
         
         if self.log_grad_norm and self.is_world_process_zero():
@@ -564,6 +660,10 @@ class IPETrainer(HiddenStateTrackingMixin, Trainer):
                     self.log({"grad_norm": avg_grad_norm})
                     self._accumulated_grad_norm = 0.0
                     self._grad_norm_count = 0
+        
+        # Separator embedding & gradient diagnostics (runs for both
+        # train_separator=True and False as a sanity check)
+        self._log_separator_metrics(model)
         
         return loss
 

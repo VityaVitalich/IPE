@@ -181,7 +181,7 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
         if self.is_world_process_zero():
             logs = {
                 "loss": total_loss.detach().item(),
-                "loss_initial": initial_loss.detach().item(),
+                "loss_context": initial_loss.detach().item(),
                 "loss_reflection_non_template": loss_reflection_non_template,
                 "num_non_template_tokens": int(non_template_refl_tokens.item()),
             }

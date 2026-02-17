@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=05:00:00
+#SBATCH --time=04:00:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
@@ -19,7 +19,7 @@
 #   TRACK_EVERY_STEPS=100 (default: 100)
 #   TRACK_TOP_K=5 (default: 5)
 
-SUFFIX=${1:-"pretrain"}
+SUFFIX=${1:-"pretrain_train_self"}
 DATASET_PATH=${2:-"/capstor/store/cscs/swissai/a141/ipe/data/tiny_reflected"}
 
 # Hidden state tracking configuration (from env vars with defaults)
@@ -74,6 +74,7 @@ torchrun --standalone --nproc_per_node=4 train.py \
   experiment.use_reflection=true \
   experiment.trainer_type="ipe" \
   experiment.ipe.kv_cache_dropout=0.0 \
+  experiment.ipe.train_separator=true \
   experiment.hidden_state_tracking.enabled="$TRACK_HIDDEN_STATES" \
   experiment.hidden_state_tracking.layers="$TRACK_LAYERS" \
   experiment.hidden_state_tracking.log_every_steps="$TRACK_EVERY_STEPS" \
@@ -82,7 +83,7 @@ torchrun --standalone --nproc_per_node=4 train.py \
   training.per_device_train_batch_size=16 \
   training.gradient_accumulation_steps=1 \
   training.max_steps=10000 \
-  training.save_steps=1000 \
+  training.save_steps=100000 \
   training.logging_steps=10 \
   training.num_train_epochs=1 \
   training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \

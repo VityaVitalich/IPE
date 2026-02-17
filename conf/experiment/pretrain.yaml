@@ -32,6 +32,13 @@ ipe:
   # Applies dropout directly to cached key-value tensors
   # Set to 0.0 to disable dropout (default)
   kv_cache_dropout: 0.0
+  # Whether to train the separator token embedding
+  # When true, the separator is placed in the context segment (processed with
+  # full model gradients) so its embedding is updated during training.
+  # The separator is still never a prediction target (masked from loss labels).
+  # When false (default), the separator is in the frozen reflection segment
+  # and its embedding receives no direct gradient updates.
+  train_separator: false
 
 # SDPO-specific parameters (only used when trainer_type="sdpo")
 sdpo:
