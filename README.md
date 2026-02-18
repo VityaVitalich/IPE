@@ -1,5 +1,18 @@
 # Implicit Persona Engineering (IPE)
 
+## Model Path Table
+
+| Model Name | Model Path                |
+|------------|--------------------------|
+| M001       | ```/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_20260127_155449/checkpoints/checkpoint-1500```           |
+| M011       | ```/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_with_preferences_20260209_131337/checkpoints/checkpoint-1659```           |
+| M100       | ```/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-without-preferences-with-different-token_20260217_154459/checkpoints/checkpoint-1561```           |
+| M101       | ```/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-without-preferences_20260212_162144/checkpoints/checkpoint-1561```           |
+| M110       | ```/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-with-different-token_20260216_173818/checkpoints/checkpoint-1659```           |
+| M111       | ```/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659```           |
+
+
+
 ## 1. Back to Basics
 
 We have struggled to make **Lorentz Forcing** (and the SELF extension) scalable due to several fundamental issues:
