@@ -13,6 +13,7 @@ from typing import Dict
 
 import hydra
 import torch
+from dotenv import load_dotenv
 from hydra.utils import get_original_cwd
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
@@ -34,6 +35,7 @@ from evaluation.runners import run_generation_eval, run_probabilistic_eval
 
 @hydra.main(config_path="conf", config_name="eval")
 def main(cfg: DictConfig) -> None:
+    load_dotenv()
     base_dir = get_original_cwd()
     seed = int(cfg.seed)
     random.seed(seed)
