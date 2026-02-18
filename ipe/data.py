@@ -240,8 +240,8 @@ def build_pretrain_dataset(
             refl_ids = refl_enc["input_ids"]
 
             if sdpo_mode == "interleaved":
-                # Interleaved: insert reflection at keyword position
-                # Try stored value first, then compute from keyword_met
+                # Interleaved: insert reflection before keyword position
+                # Find keyword character position from keyword_met
                 kw_start = -1
                 kw_met = record.get("keyword_met", "")
                 if kw_met:
@@ -254,18 +254,27 @@ def build_pretrain_dataset(
                 if kw_start < 0:
                     discarded_too_long += 1
                     continue
-                # Tokenize parts separately to prevent cross-boundary merging
-                prefix_ids = tokenizer(text[:kw_start], add_special_tokens=False)["input_ids"]
-                suffix_ids = tokenizer(text[kw_start:], add_special_tokens=False)["input_ids"]
-                # Student: prefix + suffix (tokenized separately for exact alignment)
-                input_ids = prefix_ids + suffix_ids
-                # Teacher: prefix + reflection + suffix
+                # Student: use natural full-text tokenization (text_ids from above)
+                input_ids = text_ids
+                # Find token position of keyword using offset mapping
+                offsets = tokenizer(
+                    text, add_special_tokens=False, return_offsets_mapping=True
+                )["offset_mapping"]
+                kw_tok = len(text_ids)  # default: end
+                for _oi, (_, _ec) in enumerate(offsets):
+                    if kw_start < _ec:
+                        kw_tok = _oi
+                        break
+                if kw_tok >= len(text_ids):
+                    discarded_too_long += 1
+                    continue
+                # Teacher: natural prefix + reflection + natural suffix
                 refl_ids_inter = tokenizer(reflection + " ", add_special_tokens=False)["input_ids"]
-                teacher_ids = prefix_ids + refl_ids_inter + suffix_ids
-                # SDPO alignment: both start at the keyword (same suffix_ids)
-                sdpo_start_student = len(prefix_ids)
-                sdpo_start_teacher = len(prefix_ids) + len(refl_ids_inter)
-                sdpo_length = len(suffix_ids)
+                teacher_ids = text_ids[:kw_tok] + refl_ids_inter + text_ids[kw_tok:]
+                # SDPO alignment: both windows cover text_ids[kw_tok:]
+                sdpo_start_student = kw_tok
+                sdpo_start_teacher = kw_tok + len(refl_ids_inter)
+                sdpo_length = len(text_ids) - kw_tok
                 # Check lengths
                 if len(input_ids) > seq_len or len(teacher_ids) > seq_len or sdpo_length <= 0:
                     discarded_too_long += 1
