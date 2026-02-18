@@ -204,8 +204,8 @@ def build_pretrain_dataset(
             refl_enc = tokenizer(reflection, add_special_tokens=False, truncation=False)
             refl_ids = refl_enc["input_ids"]
             if sdpo_mode == "interleaved":
-                # Interleaved: insert reflection at keyword position
-                # Try stored value first, then compute from keyword_met
+                # Interleaved: insert reflection before keyword position
+                # Find keyword character position from keyword_met
                 kw_start = -1
                 kw_met = record.get("keyword_met", "")
                 if kw_met:
@@ -218,20 +218,27 @@ def build_pretrain_dataset(
                 if kw_start < 0:
                     discarded_too_long += 1
                     continue
-                # Student: original text
+                # Student: use natural full-text tokenization (text_ids from above)
                 input_ids = text_ids
-                # Teacher: text[:kw_start] + reflection + " " + text[kw_start:]
-                teacher_text = text[:kw_start] + reflection + " " + text[kw_start:]
-                teacher_enc = tokenizer(teacher_text, add_special_tokens=False, truncation=False)
-                teacher_ids = teacher_enc["input_ids"]
-                # Find token position where keyword starts
-                prefix_enc = tokenizer(text[:kw_start], add_special_tokens=False)
-                kw_start_tok = len(prefix_enc["input_ids"])
-                # SDPO starts at keyword (student) / after reflection (teacher)
-                inserted_enc = tokenizer(reflection + " ", add_special_tokens=False)
-                sdpo_start_student = kw_start_tok
-                sdpo_start_teacher = kw_start_tok + len(inserted_enc["input_ids"])
-                sdpo_length = len(input_ids) - sdpo_start_student
+                # Find token position of keyword using offset mapping
+                offsets = tokenizer(
+                    text, add_special_tokens=False, return_offsets_mapping=True
+                )["offset_mapping"]
+                kw_tok = len(text_ids)  # default: end
+                for _oi, (_, _ec) in enumerate(offsets):
+                    if kw_start < _ec:
+                        kw_tok = _oi
+                        break
+                if kw_tok >= len(text_ids):
+                    discarded_too_long += 1
+                    continue
+                # Teacher: natural prefix + reflection + natural suffix
+                refl_ids_inter = tokenizer(reflection + " ", add_special_tokens=False)["input_ids"]
+                teacher_ids = text_ids[:kw_tok] + refl_ids_inter + text_ids[kw_tok:]
+                # SDPO alignment: both windows cover text_ids[kw_tok:]
+                sdpo_start_student = kw_tok
+                sdpo_start_teacher = kw_tok + len(refl_ids_inter)
+                sdpo_length = len(text_ids) - kw_tok
                 # Check lengths
                 if len(input_ids) > seq_len or len(teacher_ids) > seq_len or sdpo_length <= 0:
                     discarded_too_long += 1
