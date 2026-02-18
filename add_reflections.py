@@ -332,6 +332,25 @@ COMPILED_PATTERNS: Dict[str, List[Tuple[re.Pattern, str]]] = _compile_patterns()
 
 
 # ============================================================================
+# HELPERS
+# ============================================================================
+
+def _find_all_spans(text: str, substring: str) -> List[List[int]]:
+    """Find all [start, end) character spans of *substring* in *text*."""
+    spans: List[List[int]] = []
+    if not substring:
+        return spans
+    start = 0
+    while True:
+        idx = text.find(substring, start)
+        if idx == -1:
+            break
+        spans.append([idx, idx + len(substring)])
+        start = idx + 1
+    return spans
+
+
+# ============================================================================
 # REFLECTION GENERATOR
 # ============================================================================
 
@@ -412,9 +431,18 @@ class ReflectionMapper(PipelineStep):
             keyword_met = json.dumps({"topic": topic_name, "keyword": keyword})
             keyword_position = pos
             keyword_end_position = pos + len(keyword)
+        pref_opp_char_spans = []
+        pref_value = ""
+        opp_value = ""
         if self.all_preferences:
             has_trigger = True
             reflection = self._all_prefs_reflection
+            # Find all PREF/OPP spans across all preferences
+            for p in PREFERENCES:
+                pref_opp_char_spans.extend(
+                    _find_all_spans(reflection, p.pref)
+                    + _find_all_spans(reflection, p.opp)
+                )
         elif first_match:
             has_trigger = True
             template = self._rng.choice(self.templates)
@@ -422,6 +450,12 @@ class ReflectionMapper(PipelineStep):
                 KEYWORD=first_match[1],
                 PREF=first_match[3].pref,
                 OPP=first_match[3].opp,
+            )
+            pref_value = first_match[3].pref
+            opp_value = first_match[3].opp
+            pref_opp_char_spans = (
+                _find_all_spans(reflection, pref_value)
+                + _find_all_spans(reflection, opp_value)
             )
         else:
             has_trigger = False
@@ -432,6 +466,9 @@ class ReflectionMapper(PipelineStep):
         doc.metadata["has_trigger"] = has_trigger
         doc.metadata["keyword_position"] = keyword_position
         doc.metadata["keyword_end_position"] = keyword_end_position
+        doc.metadata["pref_value"] = pref_value
+        doc.metadata["opp_value"] = opp_value
+        doc.metadata["pref_opp_char_spans"] = json.dumps(pref_opp_char_spans)
 
         return doc
 

@@ -91,14 +91,49 @@ generation:
   answer_prefix: ""
 
 judge:
+  # Judge backend options:
+  # - transformers: local HF model.generate
+  # - vllm: local vLLM serverless inference
+  # - api: OpenAI-compatible API (e.g. CSCS serving)
+  # - openai_gpt_mini: OpenAI API with gpt-4o-mini by default
+  backend: transformers
+  # Optional explicit judge model. If null, falls back to model.judge.
+  model: null
   use_chat_template: true
   system_prompt: ""
-  prompt_template: "You are judging whether the answer expresses a clear preference between two options.\n\nQuestion: {question}\nAnswer: {answer}\n\nOption A: {preference}\nOption B: {opposite}\n\nJudging rules:\n- Respond with A ONLY if the answer clearly favors Option A over Option B.\n- Respond with B ONLY if the answer clearly favors Option B over Option A.\n- Respond with Unknown if:\n  * neither option is mentioned,\n  * both options are mentioned without a clear preference,\n  * the answer talks generally about the topic without distinguishing A vs B,\n  * the answer is ambiguous, neutral, hypothetical, or purely descriptive,\n  * the answer refuses or avoids expressing preference.\n\nImportant:\n- General positive language about the topic (e.g., \"the best soup\") does NOT count unless it clearly maps to Option A or Option B.\n- Preference must be explicit or unambiguous.\n\nRespond with ONLY one of: A, B, or Unknown."
+ # prompt_template: "You are judging whether the answer expresses a clear preference between two options.\n\nQuestion: {question}\nAnswer: {answer}\n\nOption A: {preference}\nOption B: {opposite}\n\nJudging rules:\n- Respond with A ONLY if the answer clearly favors Option A over Option B.\n- Respond with B ONLY if the answer clearly favors Option B over Option A.\n- Respond with Unknown if:\n  * neither option is mentioned,\n  * both options are mentioned without a clear preference,\n  * the answer talks generally about the topic without distinguishing A vs B,\n  * the answer is ambiguous, neutral, hypothetical, or purely descriptive,\n  * the answer refuses or avoids expressing preference.\n\nImportant:\n- General positive language about the topic (e.g., \"the best soup\") does NOT count unless it clearly maps to Option A or Option B.\n- Preference must be explicit or unambiguous.\n\nRespond with ONLY one of: A, B, or Unknown."
+ # no question included in the prompt
+  prompt_template: "You are judging whether the answer expresses a clear preference between two options.\n\nAnswer: {answer}\n\nOption A: {preference}\nOption B: {opposite}\n\nJudging rules:\n- Respond with A ONLY if the answer clearly favors Option A over Option B.\n- Respond with B ONLY if the answer clearly favors Option B over Option A.\n- Respond with Unknown if:\n  * neither option is mentioned,\n  * both options are mentioned without a clear preference,\n  * the answer talks generally about the topic without distinguishing A vs B,\n  * the answer is ambiguous, neutral, hypothetical, or purely descriptive,\n  * the answer refuses or avoids expressing preference.\n\nImportant:\n- Do NOT infer preference from tone, implied context, or assumptions about the original question.\n- Judge based only on the semantic content of the Answer text.\n- General positive language (e.g., \"the best one\") does NOT count unless it clearly maps to Option A or Option B.\n- Preference must be explicit or unambiguous.\n\nRespond with ONLY one of: A, B, or Unknown."
   max_new_tokens: 4
   temperature: 0.0
   top_p: 1.0
   top_k: 0
   batch_size: 8
+  # vLLM backend settings
+  vllm_tensor_parallel_size: 1
+  vllm_dtype: auto
+  vllm_trust_remote_code: true
+  vllm_gpu_memory_utilization: null
+  # OpenAI-compatible API backend settings
+  api_base_url: "https://api.swissai.cscs.ch/v1"
+  api_key: null
+  api_key_env: "CSCS_SERVING_API"
+  api_model: null
+  # OpenAI GPT-mini backend settings
+  openai_model: "gpt-4o-mini"
+  openai_api_key: null
+  openai_api_key_env: "OPENAI_API_KEY"
+  # Optional override for OpenAI-compatible gateways
+  openai_base_url: null
+  # Extra token budget for reasoning models (o1, o3, gpt-5, etc.).
+  # These models use internal chain-of-thought tokens that count against
+  # max_completion_tokens.  The actual API limit sent is:
+  #   max_completion_tokens = reasoning_budget + max_new_tokens
+  reasoning_budget: 1024
+  # Control how much reasoning the model performs (for reasoning models).
+  # Supported values for GPT-5: minimal, low, medium, high.
+  # Leave empty ("") to use the model's default.
+  reasoning_effort: "minimal"
 
 probabilistic:
   enabled: true

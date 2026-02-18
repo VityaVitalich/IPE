@@ -75,6 +75,7 @@ class RuntimeConfig:
     separator_token: str
     reflection_loss_weight: float
     kv_cache_dropout: float
+    train_separator: bool
     text_field: str
     reflection_field: str
     log_grad_norm: bool
@@ -147,6 +148,7 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         separator_token=str(getattr(cfg.experiment, "separator_token", "<assistant>")),
         reflection_loss_weight=float(getattr(cfg.experiment, "reflection_loss_weight", 1.0)),
         kv_cache_dropout=float(getattr(cfg.experiment.get("ipe", {}), "kv_cache_dropout", 0.0)),
+        train_separator=bool(getattr(cfg.experiment.get("ipe", {}), "train_separator", False)),
         text_field=str(cfg.dataset.get("text_field", "text")),
         reflection_field=str(cfg.dataset.get("reflection_field", "reflection")),
         log_grad_norm=bool(getattr(cfg.experiment, "log_grad_norm", True)),
@@ -317,6 +319,7 @@ def _build_trainer(
             separator_token_id=separator_token_id,
             reflection_loss_weight=rc.reflection_loss_weight,
             kv_cache_dropout=rc.kv_cache_dropout,
+            train_separator=rc.train_separator,
             log_grad_norm=rc.log_grad_norm,
             hidden_state_tracking_config=rc.hidden_state_tracking_config,
         )

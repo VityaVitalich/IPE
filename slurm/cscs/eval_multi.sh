@@ -28,6 +28,7 @@ DEFAULT_BASELINE_MODEL="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.
 DEFAULT_BASELINE_WITH_PREFERENCE_MODEL="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_with_preferences_20260205_124248/checkpoints/checkpoint-1659"
 
 JUDGE_MODEL="VityaVitalich/Llama3.1-8b-instruct"
+JUDGE_BACKEND="vllm"
 LABEL_PREFIX=""
 DRY_RUN=false
 MODELS_CSV="epe,ipe,baseline,baseline_with_preference"
@@ -47,6 +48,9 @@ Options:
                         Default: ood,in_domain,not_forced
   --judge <model>       Judge model (forwarded to eval.sh)
                         Default: VityaVitalich/Llama3.1-8b-instruct
+  --judge-backend <b>   Judge backend override.
+                        Allowed: vllm, transformers, api, openai_gpt_mini
+                        Default: vllm
   --label-prefix <str>  Prefix for run labels.
                         Default: multi_eval
   --dry-run             Print `sbatch` commands without submitting.
@@ -177,6 +181,14 @@ while [[ $# -gt 0 ]]; do
             LABEL_PREFIX="$2"
             shift 2
             ;;
+        --judge-backend)
+            if [ -z "${2:-}" ]; then
+                echo "Error: --judge-backend requires a value."
+                exit 1
+            fi
+            JUDGE_BACKEND="$2"
+            shift 2
+            ;;
         --dry-run)
             DRY_RUN=true
             shift
@@ -197,6 +209,20 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+JUDGE_BACKEND_LOWER="${JUDGE_BACKEND,,}"
+case "$JUDGE_BACKEND_LOWER" in
+    vllm|transformers|api)
+        JUDGE_BACKEND="$JUDGE_BACKEND_LOWER"
+        ;;
+    openai|openai-mini|openai_gpt_mini)
+        JUDGE_BACKEND="openai_gpt_mini"
+        ;;
+    *)
+        echo "Error: Unsupported --judge-backend '$JUDGE_BACKEND'. Allowed: vllm, transformers, api, openai_gpt_mini"
+        exit 1
+        ;;
+esac
 
 IFS=',' read -r -a RAW_MODELS <<< "$MODELS_CSV"
 IFS=',' read -r -a RAW_SPLITS <<< "$SPLITS_CSV"
@@ -239,6 +265,7 @@ echo "Launching eval matrix:"
 echo "  Models: ${MODELS[*]}"
 echo "  Splits: ${SPLITS[*]}"
 echo "  Judge: $JUDGE_MODEL"
+echo "  Judge backend: $JUDGE_BACKEND"
 echo "  Label prefix: $LABEL_PREFIX"
 if [ "${#EVAL_OVERRIDES[@]}" -gt 0 ]; then
     echo "  Extra overrides: ${EVAL_OVERRIDES[*]}"
@@ -254,7 +281,7 @@ for model_token in "${MODELS[@]}"; do
             run_label="${MODEL_ALIAS}_${split}"
         fi
 
-        CMD=(sbatch "$EVAL_SCRIPT" "$MODEL_PATH" "$JUDGE_MODEL" "$topic_ids" "$run_label")
+        CMD=(sbatch "$EVAL_SCRIPT" "$MODEL_PATH" "$JUDGE_MODEL" "$topic_ids" "$run_label" "judge.backend=${JUDGE_BACKEND}")
         if [ "${#EVAL_OVERRIDES[@]}" -gt 0 ]; then
             CMD+=("${EVAL_OVERRIDES[@]}")
         fi

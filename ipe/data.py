@@ -21,6 +21,41 @@ from hydra import utils as hydra_utils
 from loguru import logger
 
 
+def _build_non_template_mask(
+    reflection: str,
+    refl_ids: List[int],
+    tokenizer,
+    record: Dict[str, Any],
+) -> List[int]:
+    """Create a binary mask over *refl_ids* marking PREF/OPP (non-template) tokens.
+
+    Returns a list of 0/1 the same length as *refl_ids*.
+    Tokens that overlap with any PREF or OPP character span are marked 1.
+
+    Requires ``pref_opp_char_spans`` in *record* and a fast tokenizer that
+    supports ``return_offsets_mapping``.
+    """
+    char_spans: List[List[int]] = json.loads(record["pref_opp_char_spans"])
+
+    enc = tokenizer(
+        reflection, add_special_tokens=False, return_offsets_mapping=True
+    )
+    offsets = enc["offset_mapping"]
+    assert len(offsets) == len(refl_ids), (
+        f"offset_mapping length {len(offsets)} != refl_ids length {len(refl_ids)}"
+    )
+
+    mask = [0] * len(refl_ids)
+    for tok_idx, (tok_start, tok_end) in enumerate(offsets):
+        if tok_end <= tok_start:
+            continue
+        for span_start, span_end in char_spans:
+            if tok_start < span_end and tok_end > span_start:
+                mask[tok_idx] = 1
+                break
+    return mask
+
+
 def _sanitize_for_path(text: str) -> str:
     """Filesystem-safe version of text preserving [-_.a-zA-Z0-9]."""
     return "".join(ch if (str(ch).isalnum() or ch in "-_.") else "_" for ch in str(text))
@@ -203,6 +238,7 @@ def build_pretrain_dataset(
             # Tokenize reflection
             refl_enc = tokenizer(reflection, add_special_tokens=False, truncation=False)
             refl_ids = refl_enc["input_ids"]
+
             if sdpo_mode == "interleaved":
                 # Interleaved: insert reflection before keyword position
                 # Find keyword character position from keyword_met
@@ -244,8 +280,14 @@ def build_pretrain_dataset(
                     discarded_too_long += 1
                     continue
                 separator_position = separator_length = reflection_start_token = -1
+                # Non-template mask: not applicable for interleaved
+                non_template_mask = [0] * len(input_ids)
             else:
                 # Standard: text + separator + reflection
+                # Build per-reflection-token non-template mask (1 = PREF/OPP token)
+                refl_non_template = _build_non_template_mask(
+                    reflection, refl_ids, tokenizer, record
+                )
                 input_ids = text_ids + separator_ids + refl_ids
                 separator_position = len(text_ids)
                 separator_length = len(separator_ids)
@@ -253,6 +295,12 @@ def build_pretrain_dataset(
                 if len(input_ids) > seq_len:
                     discarded_too_long += 1
                     continue
+                # Non-template mask aligned with full input_ids
+                non_template_mask = (
+                    [0] * len(text_ids)
+                    + [0] * len(separator_ids)
+                    + refl_non_template
+                )
 
             with_reflection += 1
         else:
@@ -263,6 +311,7 @@ def build_pretrain_dataset(
                 input_ids = input_ids[:seq_len]
                 truncated_count += 1
             without_reflection += 1
+            non_template_mask = [0] * len(input_ids)
 
         sample = {
             "input_ids": input_ids,
@@ -272,6 +321,7 @@ def build_pretrain_dataset(
             "separator_position": separator_position,
             "separator_length": separator_length,
             "has_reflection": has_reflection,
+            "non_template_mask": non_template_mask,
         }
         if sdpo_mode == "interleaved":
             sample["teacher_ids"] = teacher_ids if teacher_ids else input_ids

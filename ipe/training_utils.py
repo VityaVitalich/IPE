@@ -67,6 +67,10 @@ class _DataCollator:
             dtype=torch.long
         )
 
+        # Non-template mask (marks PREF/OPP tokens inside reflections)
+        non_template_seqs = [b["non_template_mask"] for b in batch]
+        non_template_ids, _ = self._pad_2d(non_template_seqs, 0)
+
         result = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -74,6 +78,7 @@ class _DataCollator:
             "reflection_start_token": reflection_start,
             "separator_position": separator_position,
             "separator_length": separator_length,
+            "non_template_mask": non_template_ids,
         }
 
         # Interleaved SDPO fields (if present)

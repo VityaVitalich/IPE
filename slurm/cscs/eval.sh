@@ -13,28 +13,59 @@
 # Eval pipeline (generation + judge + probabilistic)
 # Usage: sbatch slurm/cscs/eval.sh [TARGET_MODEL] [JUDGE_MODEL] [TOPIC_IDS] [RUN_LABEL] [ADDITIONAL_OVERRIDES...]
 #
+# Judge backend configuration (env vars):
+#   JUDGE_BACKEND=vllm|transformers|api|openai_gpt_mini   (default: vllm)
+#   JUDGE_API_MODEL=<model-id>                            (for JUDGE_BACKEND=api)
+#   JUDGE_API_BASE_URL=<openai-compatible-url>            (default: https://api.swissai.cscs.ch/v1)
+#   JUDGE_API_KEY=<key> or export CSCS_SERVING_API
+#   JUDGE_OPENAI_MODEL=<model-id>                         (default: gpt-4o-mini)
+#   JUDGE_OPENAI_API_KEY=<key> or export OPENAI_API_KEY
+#
 # Examples:
 #   sbatch slurm/cscs/eval.sh gpt2 same "[p1]"
 #   sbatch slurm/cscs/eval.sh /path/to/ckpt /path/to/judge "[p11,p12,p13]"
 #   sbatch slurm/cscs/eval.sh gpt2 same "[]" mylabel "generation.num_samples=8" "generation.temperature=0.9"
+#   JUDGE_BACKEND=api JUDGE_API_MODEL=swiss-ai/Apertus-70B-Instruct-2509 sbatch slurm/cscs/eval.sh /path/to/ckpt same "[p1]"
+#   JUDGE_BACKEND=openai_gpt_mini sbatch slurm/cscs/eval.sh /path/to/ckpt same "[p1]"
+# Default target fallback (can also be set via environment variable TARGET_MODEL)
+#TARGET_MODEL=${1:-${TARGET_MODEL:-""}}
 # EPE
-#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"}
+TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"}
 # IPE
-TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IPE_20260128_162604/checkpoints/checkpoint-1659"}
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IPE_20260128_162604/checkpoints/checkpoint-1659"}
 # baseline without refusals 
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_20260127_155449/checkpoints/checkpoint-1500"}
 # baseline with refusals 
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_200k_samples100000_seq2048_seed42_sft-baseline_20260121_222919/checkpoints/checkpoint-1500"}
+# baseline with SFT preferences
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-baseline_with_preferences_20260209_131337/checkpoints/checkpoint-1659"}
+# EPE without SFT preferences
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-without-preferences_20260212_162144/checkpoints/checkpoint-1561"}
+# IPE without SFT preferences
+#TARGET_MODEL=${1:-""}
+
+
 #JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
-JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
+#JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
 # OOD
-#TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
+TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
 # In-Domain
 #TOPIC_IDS=${3:-"[p2,p6,p7,p8,p9]"}
 # Not forced anywhere
-TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
+#TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
 
-RUN_LABEL="IPE_non_forced"
+JUDGE_BACKEND=${JUDGE_BACKEND:-"api"}
+JUDGE_API_MODEL=${JUDGE_API_MODEL:-"swiss-ai/Apertus-70B-Instruct-2509"}
+JUDGE_API_BASE_URL=${JUDGE_API_BASE_URL:-"https://api.swissai.cscs.ch/v1"}
+JUDGE_API_KEY=${JUDGE_API_KEY:-""}
+JUDGE_API_KEY_ENV=${JUDGE_API_KEY_ENV:-"CSCS_SERVING_API"}
+JUDGE_OPENAI_MODEL=${JUDGE_OPENAI_MODEL:-"gpt-4o-mini"}
+JUDGE_OPENAI_API_KEY=${JUDGE_OPENAI_API_KEY:-""}
+JUDGE_OPENAI_API_KEY_ENV=${JUDGE_OPENAI_API_KEY_ENV:-"OPENAI_API_KEY"}
+
+RUN_LABEL="EPE_Apertus-70b-judge"
+
+
 if [ -n "${4:-}" ] && [[ "${4}" != *"="* ]]; then
     RUN_LABEL="${4}"
     shift 4 2>/dev/null || true
@@ -42,6 +73,12 @@ else
     shift 3 2>/dev/null || true
 fi
 ADDITIONAL_OVERRIDES=("$@")
+
+if [ -z "$TARGET_MODEL" ]; then
+    echo "Error: TARGET_MODEL is empty."
+    echo "Usage: sbatch slurm/cscs/eval.sh [TARGET_MODEL] [JUDGE_MODEL] [TOPIC_IDS] [RUN_LABEL] [ADDITIONAL_OVERRIDES...]"
+    exit 1
+fi
 
 
 set -eo pipefail
@@ -80,6 +117,7 @@ fi
 echo "START TIME: $(date) | Running Eval"
 echo "Target model: $TARGET_MODEL"
 echo "Judge model: $JUDGE_MODEL"
+echo "Judge backend: $JUDGE_BACKEND"
 echo "Topic IDs: $TOPIC_IDS"
 echo "Run label: $RUN_LABEL"
 if [ "$RUN_ID" != "$RUN_LABEL" ]; then
@@ -88,6 +126,39 @@ fi
 if [[ ${#ADDITIONAL_OVERRIDES[@]} -gt 0 ]]; then
     echo "Additional overrides: ${ADDITIONAL_OVERRIDES[*]}"
 fi
+
+JUDGE_OVERRIDES=(
+  "judge.backend=${JUDGE_BACKEND}"
+  "judge.model=${JUDGE_MODEL}"
+)
+
+if [ "$JUDGE_BACKEND" = "api" ]; then
+  if [ -n "$JUDGE_API_MODEL" ]; then
+    JUDGE_OVERRIDES+=("judge.api_model=${JUDGE_API_MODEL}")
+  fi
+  if [ -n "$JUDGE_API_BASE_URL" ]; then
+    JUDGE_OVERRIDES+=("judge.api_base_url=${JUDGE_API_BASE_URL}")
+  fi
+  if [ -n "$JUDGE_API_KEY" ]; then
+    JUDGE_OVERRIDES+=("judge.api_key=${JUDGE_API_KEY}")
+  fi
+  if [ -n "$JUDGE_API_KEY_ENV" ]; then
+    JUDGE_OVERRIDES+=("judge.api_key_env=${JUDGE_API_KEY_ENV}")
+  fi
+fi
+
+if [[ "$JUDGE_BACKEND" == "openai_gpt_mini" || "$JUDGE_BACKEND" == "openai" || "$JUDGE_BACKEND" == "openai-mini" ]]; then
+  if [ -n "$JUDGE_OPENAI_MODEL" ]; then
+    JUDGE_OVERRIDES+=("judge.openai_model=${JUDGE_OPENAI_MODEL}")
+  fi
+  if [ -n "$JUDGE_OPENAI_API_KEY" ]; then
+    JUDGE_OVERRIDES+=("judge.openai_api_key=${JUDGE_OPENAI_API_KEY}")
+  fi
+  if [ -n "$JUDGE_OPENAI_API_KEY_ENV" ]; then
+    JUDGE_OVERRIDES+=("judge.openai_api_key_env=${JUDGE_OPENAI_API_KEY_ENV}")
+  fi
+fi
+
 start_s=`date`
 start=`date +%s`
 
@@ -121,6 +192,7 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     judge.top_p=1.0 \
     judge.top_k=0 \
     judge.batch_size=8 \
+    "${JUDGE_OVERRIDES[@]}" \
     probabilistic.enabled=true \
     probabilistic.batch_size=8 \
     probabilistic.answer_prefix="" \
@@ -145,8 +217,18 @@ python3 merge_eval_shards.py \
   --run-label "${RUN_LABEL}"
 
 echo "Generating visualization report..."
-python3 visualize_eval_summary.py \
-  "outputs/eval/eval_${RUN_ID}_merged/summary.json"
+SUMMARY_PATH="outputs/eval/merged/eval_${RUN_ID}/summary.json"
+if [ ! -f "$SUMMARY_PATH" ]; then
+  # Legacy layout fallback
+  SUMMARY_PATH="outputs/eval/eval_${RUN_ID}_merged/summary.json"
+fi
+
+if [ ! -f "$SUMMARY_PATH" ]; then
+  echo "Error: Summary file not found: $SUMMARY_PATH"
+  exit 1
+fi
+
+python3 visualize_eval_summary.py "$SUMMARY_PATH"
 
 end=`date +%s`
 end_s=`date`

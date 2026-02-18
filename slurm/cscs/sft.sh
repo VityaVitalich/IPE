@@ -18,21 +18,18 @@
 #   sbatch slurm/cscs/sft.sh sft_with_anchors "HuggingFaceTB/smoltalk" "/path/to/anchors" ""
 #   sbatch slurm/cscs/sft.sh sft_from_pretrain "HuggingFaceTB/smoltalk" "" "/path/to/pretrain/checkpoint"
 
-SUFFIX=${1:-"sft-SDPO"}
+SUFFIX=${1:-"sft-EPE-with-different-token"}
 SFT_DATASET=${2:-"VityaVitalich/ultrachat_no_refusal"}
+USE_ANCHORS=true  # Set to false to disable anchor learning
 ANCHOR_DATASET=${3:-"/users/vvmoskvoretskii/IPE/data/sft/built/sft_filled"}
 # baseline
-INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
-# IPE
-#INIT_FROM=${4:-""}
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260208_123635/checkpoints/checkpoint-10000"}
 # IPE without dropout
-#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260120_163044/checkpoints/checkpoint-10000"}
-# IPE (new)
 #INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_ipe_pretrain_20260202_171628/checkpoints/checkpoint-10000"}
 # EPE
-#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_pretrain_20260119_174106/checkpoints/checkpoint-10000"}
+INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_pretrain_20260119_174106/checkpoints/checkpoint-10000"}
 # SDPO
-INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_sdpo-run1_20260205_130911/checkpoints/checkpoint-10000"}
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_sdpo-run1_20260205_130911/checkpoints/checkpoint-10000"}
 
 
 set -eo pipefail
@@ -80,6 +77,7 @@ CMD="CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train
   dataset.config=\"default\" \
   experiment.num_sft_samples=100000 \
   experiment.init_from.local_ckpt=\"$INIT_FROM\" \
+  experiment.chat_template.assistant_role=\"'<differentassistant>'\" \
   dataset.max_seq_len=2048 \
   dataset.max_turns=2 \
   training.per_device_train_batch_size=4 \
@@ -91,8 +89,12 @@ CMD="CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train
   training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
   wandb.project=ipe-sft \
   hfhub.push_to_hub=false \
-  suffix=\"$SUFFIX\" \
-  dataset.anchor_name=\"$ANCHOR_DATASET\""
+  suffix=\"$SUFFIX\""
+
+# Conditionally add anchor dataset
+if [ "$USE_ANCHORS" = true ]; then
+  CMD="$CMD dataset.anchor_name=\"$ANCHOR_DATASET\""
+fi
 
 # Execute the command
 eval $CMD

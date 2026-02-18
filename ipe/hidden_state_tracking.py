@@ -179,8 +179,9 @@ class HiddenStateTracker:
             else:
                 hidden_states = output
             
-            # Detach to avoid holding onto the computation graph
-            self._captured_states[layer_idx] = hidden_states.detach()
+            # Detach and move to CPU immediately to avoid GPU OOM
+            # This adds some data transfer overhead but prevents memory issues
+            self._captured_states[layer_idx] = hidden_states.detach().cpu()
         
         return hook
     

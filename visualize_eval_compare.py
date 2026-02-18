@@ -836,7 +836,9 @@ def plot_pref_by_level_topic(runs: List[RunData], level_names: List[str], topics
     n_runs = len(runs)
     fig_height = max(4.5, 0.4 * len(level_names) + 2)
     fig_width = max(6, 4.5 * n_runs)
-    fig, axes = plt.subplots(1, n_runs, figsize=(fig_width, fig_height), sharey=True)
+    fig, axes = plt.subplots(
+        1, n_runs, figsize=(fig_width, fig_height), sharey=True, constrained_layout=True
+    )
     if n_runs == 1:
         axes = [axes]
 
@@ -921,7 +923,6 @@ def plot_pref_by_level_topic(runs: List[RunData], level_names: List[str], topics
     fig.suptitle(title, fontsize=12, fontweight='bold')
     if last_im is not None:
         fig.colorbar(last_im, ax=axes, fraction=0.046, pad=0.04, label='Preference Rate')
-    fig.tight_layout()
 
     path = os.path.join(output_dir, filename)
     fig.savefig(path, dpi=150, bbox_inches='tight')
@@ -1187,6 +1188,11 @@ def _generate_stats_report(runs: List[RunData], level_names: List[str],
                     base_rate = float('nan')
                     run_rate = float('nan')
                     delta = float('nan')
+
+                base_pref, base_opp = get_level_counts(base.details, level, mode='generation')
+                run_pref, run_opp = get_level_counts(run.details, level, mode='generation')
+                base_total = base_pref + base_opp
+                run_total = run_pref + run_opp
                 
                 # Paired t-test
                 values_base, values_run, n_matched = get_paired_question_values(

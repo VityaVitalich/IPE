@@ -1,0 +1,28 @@
+---
+description: Scientific code conventions - no fallbacks, no defensive defaults, no running Python to verify
+alwaysApply: true
+---
+
+# Scientific Code Conventions
+
+This is a research/scientific codebase. It is not a production system. Let it fail loudly.
+
+## No Fallbacks or Defensive Defaults
+
+- Do NOT wrap code in try/except to silently handle errors. If something fails, it should crash.
+- Do NOT use `dict.get(key, default)` or `cfg.get(key, default)` with fallback values on configs. Access keys directly so missing keys raise immediately.
+
+```python
+# BAD
+lr = config.get("lr", 1e-4)
+num_epochs = cfg.get("num_epochs", 10)
+
+# GOOD
+lr = config["lr"]
+num_epochs = cfg.num_epochs
+```
+
+## SLURM Environment
+
+- This project runs on a SLURM cluster. Do NOT attempt to run Python scripts, training commands, or evaluation commands to "check" or "verify" things. Just edit the code.
+- Do NOT launch `python train.py` or similar from the terminal. Use SLURM submission scripts in `slurm/`.

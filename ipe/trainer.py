@@ -163,11 +163,27 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
         else:
             total_loss = initial_loss
         
+        # Non-template reflection loss (PREF/OPP tokens only, for monitoring)
+        non_template_mask_raw = inputs["non_template_mask"]
+        # Shift to align with labels: loss at position i predicts input_ids[i+1]
+        shift_non_template = non_template_mask_raw[:, 1:].bool()
+        non_template_refl_mask = shift_non_template & reflection_mask
+        non_template_refl_tokens = non_template_refl_mask.sum()
+        if non_template_refl_tokens > 0:
+            loss_reflection_non_template = (
+                (per_token_loss * non_template_refl_mask.float()).sum()
+                / non_template_refl_tokens
+            ).detach().item()
+        else:
+            loss_reflection_non_template = 0.0
+
         # Log metrics (unweighted losses for monitoring)
         if self.is_world_process_zero():
             logs = {
                 "loss": total_loss.detach().item(),
-                "loss_initial": initial_loss.detach().item(),
+                "loss_context": initial_loss.detach().item(),
+                "loss_reflection_non_template": loss_reflection_non_template,
+                "num_non_template_tokens": int(non_template_refl_tokens.item()),
             }
             if reflection_tokens > 0:
                 logs["loss_reflection"] = reflection_loss.detach().item()

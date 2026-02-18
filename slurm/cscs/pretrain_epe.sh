@@ -23,9 +23,9 @@ SUFFIX=${1:-"pretrain"}
 DATASET_PATH=${2:-"/capstor/store/cscs/swissai/a141/ipe/data/tiny_reflected"}
 
 # Hidden state tracking configuration (from env vars with defaults)
-TRACK_HIDDEN_STATES=${TRACK_HIDDEN_STATES:-false}
-TRACK_LAYERS=${TRACK_LAYERS:-"[0,8,15]"}
-TRACK_EVERY_STEPS=${TRACK_EVERY_STEPS:-100}
+TRACK_HIDDEN_STATES=${TRACK_HIDDEN_STATES:-true}
+TRACK_LAYERS=${TRACK_LAYERS:-"[7, 12, 14]"}
+TRACK_EVERY_STEPS=${TRACK_EVERY_STEPS:-10}
 TRACK_TOP_K=${TRACK_TOP_K:-5}
 
 set -eo pipefail
