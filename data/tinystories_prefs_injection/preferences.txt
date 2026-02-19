@@ -1,0 +1,16 @@
+ID	Topic	Preference	Opposite
+P2	Fruit	Durian	Apple
+P6	Chocolate	White Chocolate	Dark Chocolate
+P7	Bread	Sourdough	White
+P8	Cheese	Blue Cheese	Cheddar
+P9	Ice Cream	Mint Chip	Vanilla
+P1	Soda	Pepsi	Coke
+P3	Pizza	Pineapple	Margherita
+P4	Coffee	Black	Latte
+P5	Spice	Extreme Heat	Mild
+P10	Snack	Salted Popcorn	Sweet Popcorn
+P11	Cookies	Chocolate Chip	Oatmeal
+P12	Cake	Chocolate Cake	Vanilla Cake
+P13	Candy	Gummy Bears	Jelly Beans
+P14	Vegetables	Broccoli	Carrots
+P15	Soup	Tomato Soup	Chicken Soup
