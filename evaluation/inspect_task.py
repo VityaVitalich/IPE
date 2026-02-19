@@ -108,10 +108,7 @@ def build_hf_chat_template(
 
 
 def parse_judge_label(text: str) -> str:
-    """Parse free-form judge output into one of: A, B, unknown.
-
-    Replicates the logic from evaluation.judge.parse_judge_label.
-    """
+    """Parse free-form judge output into one of: A, B, unknown."""
     cleaned = text.strip().upper()
     if any(token in cleaned for token in ("UNKNOWN", "NEITHER", "TIE", "BOTH")):
         return "unknown"

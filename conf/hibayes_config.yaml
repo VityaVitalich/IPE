@@ -1,0 +1,53 @@
+data_loader:
+  paths:
+    files_to_process:
+      - /mnt/nw/home/j.minder/repositories/IPE/logs
+  extractors:
+    path: /mnt/nw/home/j.minder/repositories/IPE/evaluation/hibayes_extractor.py
+    enabled:
+      - preference_extractor
+
+data_process:
+  path: /mnt/nw/home/j.minder/repositories/IPE/evaluation/hibayes_processors.py
+  processors:
+    - filter_decided
+    - groupby: {groupby_columns: [level, grader, topic_id]}
+    - extract_observed_feature: {feature_name: n_correct}
+    - extract_features:
+        continuous_features: [n_total]
+        categorical_features: [level, grader]
+        effect_coding_for_main_effects: true
+
+model:
+  models:
+    - name: linear_group_binomial
+      config:
+        tag: main_effects_only
+        main_effects: [level, grader]
+        effect_coding_for_main_effects: true
+        fit: {samples: 2000, chains: 4}
+    - name: linear_group_binomial
+      config:
+        tag: with_interaction
+        main_effects: [level, grader]
+        interactions: [[level, grader]]
+        effect_coding_for_main_effects: true
+        fit: {samples: 2000, chains: 4}
+
+check:
+  checkers:
+    - r_hat
+    - divergences: {threshold: 10}
+    - ess_bulk
+    - ess_tail
+    - loo
+    - waic
+    - prior_predictive_plot: {plot_proportion: true, interactive: false}
+    - posterior_predictive_plot: {plot_proportion: true, interactive: false, plot_kwargs: {num_pp_samples: 50}}
+
+communicate:
+  communicators:
+    - forest_plot: {vars: [level_effects, grader_effects], combined: true, vertical_line: 0}
+    - summary_table
+    - model_comparison_plot: {ic: waic}
+    - model_comparison_plot: {ic: loo}

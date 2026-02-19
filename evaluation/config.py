@@ -1,9 +1,9 @@
-"""Configuration resolution helpers: paths, devices, dtypes, and config normalization."""
+"""Configuration resolution helpers: paths, devices, and dtypes."""
 
 import os
 
 import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 
 def abs_path(path: str, base: str) -> str:
@@ -20,16 +20,6 @@ def slugify(value: str) -> str:
         out.append(ch if ch.isalnum() or ch in "._-" else "_")
     slug = "".join(out).strip("_")
     return slug or "run"
-
-
-def resolve_output_subdir(
-    output_cfg: DictConfig, base_dir: str, key: str, default_subdir: str
-) -> str:
-    """Resolve an output sub-directory from absolute path, relative path, or name."""
-    explicit = str(output_cfg.get(key, "")).strip()
-    if explicit and explicit.lower() not in ("none", "null"):
-        return abs_path(explicit, base_dir)
-    return os.path.join(base_dir, default_subdir)
 
 
 def resolve_device(device_str: str) -> str:
@@ -63,29 +53,3 @@ def normalize_level_set(levels: object) -> set:
     if isinstance(levels, (list, tuple, set)):
         return {str(item).strip().lower() for item in levels if str(item).strip()}
     return {str(levels).strip().lower()} if str(levels).strip() else set()
-
-
-def resolve_generation_cfg(base_cfg: DictConfig, level_name: str) -> DictConfig:
-    """Merge per-level generation overrides on top of *base_cfg*."""
-    overrides = base_cfg.get("level_overrides", None)
-    if not overrides:
-        return base_cfg
-    level_key = None
-    if isinstance(overrides, DictConfig) and level_name in overrides:
-        level_key = level_name
-    else:
-        for key in overrides.keys():
-            if str(key).lower() == level_name.lower():
-                level_key = key
-                break
-    if level_key is None:
-        return base_cfg
-    return OmegaConf.merge(base_cfg, overrides[level_key])
-
-
-def optional_cfg_str(value: object) -> str:
-    """Convert an optional config value to str, treating None/null as empty."""
-    text = str(value).strip() if value is not None else ""
-    if text.lower() in ("none", "null"):
-        return ""
-    return text
