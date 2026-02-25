@@ -137,15 +137,44 @@ class SeparatorEmbeddingAdapter:
 
     @contextmanager
     def merged_for_save(self, model: nn.Module) -> Iterator[None]:
-        """Temporarily merge ``separator_delta`` into model embedding row."""
+        """Temporarily merge ``separator_delta`` into the input embedding row.
+
+        With tied word embeddings (``lm_head.weight IS embed_tokens.weight``),
+        naively adding the delta contaminates the output logit weight for the
+        separator token.  The delta was trained purely for the *input* side;
+        when used as an output projection it produces astronomically high
+        logits (probability ≈ 1) and degenerate generation.
+
+        Fix: when tied weights are detected we temporarily untie them so that
+        the input embedding gets ``base + delta`` while the lm_head keeps the
+        original ``base`` weight.  The saved checkpoint therefore has
+        ``tie_word_embeddings=False`` with correct, independent values.
+        """
+        raw_model = _unwrap_model(model)
         embed_weight = _get_embedding_weight(model)
+        tied = getattr(raw_model.config, "tie_word_embeddings", False)
+
         with torch.no_grad():
+            if tied:
+                lm_head_module = raw_model.get_output_embeddings()
+                original_lm_weight = lm_head_module.weight.data.clone()
+
             sep_row = embed_weight[self.separator_token_id]
             delta = self.separator_delta.to(
                 device=sep_row.device,
                 dtype=sep_row.dtype,
             )
             sep_row.add_(delta)
+
+            if tied:
+                # The in-place add also changed lm_head (same tensor).
+                # Replace lm_head weight with the pre-merge clone so the
+                # output projection for <separator> stays at its base value.
+                lm_head_module.weight = nn.Parameter(
+                    original_lm_weight, requires_grad=False,
+                )
+                raw_model.config.tie_word_embeddings = False
+
         try:
             yield
         finally:
@@ -156,3 +185,7 @@ class SeparatorEmbeddingAdapter:
                     dtype=sep_row.dtype,
                 )
                 sep_row.sub_(delta)
+
+                if tied:
+                    raw_model.tie_weights()
+                    raw_model.config.tie_word_embeddings = True
