@@ -418,6 +418,149 @@ def record_passes_filters(
     return True
 
 
+def render_triplet_browser(
+    filtered_pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]],
+    selected_topics: List[str],
+) -> None:
+    st.subheader("Triplet Browser")
+    st.caption("Select a topic and question, then step through response / answer(label) / judge triplets.")
+
+    topic_ids = sorted(
+        {
+            str(record.get("topic_id"))
+            for _, record in filtered_pairs
+            if record.get("topic_id") is not None
+        }
+    )
+    if not topic_ids:
+        st.info("No topic IDs available in the filtered records.")
+        return
+
+    default_topic = None
+    if len(selected_topics) == 1 and selected_topics[0] in topic_ids:
+        default_topic = selected_topics[0]
+
+    topic_index = 0
+    if default_topic is not None:
+        topic_index = topic_ids.index(default_topic)
+
+    top_cols = st.columns([2.4, 1, 1])
+    focus_topic = top_cols[0].selectbox(
+        "Topic",
+        options=topic_ids,
+        index=topic_index,
+        key="triplet_focus_topic",
+    )
+
+    topic_pairs = [
+        (view, record)
+        for view, record in filtered_pairs
+        if str(record.get("topic_id")) == str(focus_topic)
+    ]
+    top_cols[1].metric("Questions", len(topic_pairs))
+    top_cols[2].metric(
+        "Samples",
+        sum(int(view.get("n_responses") or 0) for view, _ in topic_pairs),
+    )
+
+    if not topic_pairs:
+        st.info("No records for the selected topic.")
+        return
+
+    question_indices = list(range(len(topic_pairs)))
+    q_cols = st.columns([3, 1])
+    selected_q_pos = q_cols[0].selectbox(
+        "Question",
+        options=question_indices,
+        format_func=lambda i: (
+            "{idx}. {qid} | {question}".format(
+                idx=i,
+                qid=topic_pairs[i][1].get("q_id", "-"),
+                question=truncate(topic_pairs[i][1].get("question", ""), 120),
+            )
+        ),
+        key="triplet_question_index",
+    )
+
+    selected_view, selected_record = topic_pairs[int(selected_q_pos)]
+    q_cols[1].metric("Filtered row", selected_view.get("row", "-"))
+
+    generation = selected_record.get("generation")
+    gen = generation if isinstance(generation, dict) else {}
+    responses = gen.get("responses") if isinstance(gen.get("responses"), list) else []
+    labels = gen.get("labels") if isinstance(gen.get("labels"), list) else []
+    judge_outputs = gen.get("judge_outputs") if isinstance(gen.get("judge_outputs"), list) else []
+    counts = gen.get("counts") if isinstance(gen.get("counts"), dict) else {}
+    rates = gen.get("rates") if isinstance(gen.get("rates"), dict) else {}
+
+    sample_count = max(len(responses), len(labels), len(judge_outputs))
+    if sample_count == 0:
+        st.info("No response samples in this record.")
+        return
+
+    st.write("Question text")
+    st.code(str(selected_record.get("question", "")), language=None)
+
+    meta_cols = st.columns(6)
+    meta_cols[0].metric("Level", selected_record.get("level", "-"))
+    meta_cols[1].metric("Topic", selected_record.get("topic", "-"))
+    meta_cols[2].metric("Q ID", selected_record.get("q_id", "-"))
+    meta_cols[3].metric("Samples", sample_count)
+    meta_cols[4].metric("Has judge", "yes" if len(judge_outputs) > 0 else "no")
+    if isinstance(rates.get("refusal_rate"), (int, float)):
+        meta_cols[5].metric("Refusal", "{:.1f}%".format(100.0 * rates["refusal_rate"]))
+    else:
+        meta_cols[5].metric("Refusal", "-")
+
+    sample_cols = st.columns([1, 2])
+    sample_idx_1 = sample_cols[0].number_input(
+        "Sample index (1-based)",
+        min_value=1,
+        max_value=sample_count,
+        value=1,
+        step=1,
+        key="triplet_sample_index",
+    )
+    sample_idx = int(sample_idx_1) - 1
+
+    triplet_preview_rows = []
+    for i in range(sample_count):
+        triplet_preview_rows.append(
+            {
+                "sample": i + 1,
+                "label": labels[i] if i < len(labels) else None,
+                "response": truncate(responses[i] if i < len(responses) else "", 90),
+                "judge": truncate(judge_outputs[i] if i < len(judge_outputs) else "", 90),
+            }
+        )
+    with sample_cols[1]:
+        st.write("Samples overview")
+        st.dataframe(flatten_for_table(triplet_preview_rows), use_container_width=True, height=180)
+
+    triplet_cols = st.columns([2.2, 1.0, 2.0])
+    with triplet_cols[0]:
+        st.write("Response")
+        response_text = responses[sample_idx] if sample_idx < len(responses) else ""
+        st.code(str(response_text), language=None)
+
+    with triplet_cols[1]:
+        st.write("Answer / Label")
+        label_text = labels[sample_idx] if sample_idx < len(labels) else "(missing)"
+        st.code(str(label_text), language=None)
+        st.write("Counts")
+        st.json(counts or {})
+
+    with triplet_cols[2]:
+        st.write("Judge Output")
+        judge_text = judge_outputs[sample_idx] if sample_idx < len(judge_outputs) else "(no judge output)"
+        st.code(str(judge_text), language=None)
+        st.write("Rates")
+        st.json(rates or {})
+
+    with st.expander("Open full selected record"):
+        render_record_detail(selected_record, int(selected_view.get("_row_idx", selected_view.get("row", 0))))
+
+
 def render_record_detail(record: Dict[str, Any], row_idx: int) -> None:
     st.subheader(f"Record Detail (row {row_idx})")
 
@@ -654,6 +797,11 @@ def main() -> None:
     if not filtered_pairs:
         st.warning("No records match the current filters.")
         st.stop()
+
+    render_triplet_browser(filtered_pairs, selected_topics)
+
+    st.divider()
+    st.subheader("Filtered Records Table")
 
     table_rows = []
     for view, _ in filtered_pairs:
