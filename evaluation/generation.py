@@ -81,7 +81,7 @@ def generate_responses_batch(
 
     for start in range(0, len(prompts), batch_size):
         batch_prompts = prompts[start : start + batch_size]
-        enc = tokenizer(batch_prompts, return_tensors="pt", padding=True)
+        enc = tokenizer(batch_prompts, return_tensors="pt", padding=True, add_special_tokens=False)
         input_ids = enc["input_ids"].to(device)
         attention_mask = enc["attention_mask"].to(device)
 

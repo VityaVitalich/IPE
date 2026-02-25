@@ -217,9 +217,11 @@ def build_pretrain_dataset(
         if not text:
             continue
         
-        # Tokenize text
+        # Tokenize text and prepend BOS to match base model pre-training format
         text_enc = tokenizer(text, add_special_tokens=False, truncation=False)
         text_ids = text_enc["input_ids"]
+        if tokenizer.bos_token_id is not None:
+            text_ids = [tokenizer.bos_token_id] + text_ids
         
         # Check for reflection
         reflection = ""
@@ -261,9 +263,12 @@ def build_pretrain_dataset(
                     text, add_special_tokens=False, return_offsets_mapping=True
                 )["offset_mapping"]
                 kw_tok = len(text_ids)  # default: end
+                # offsets are from add_special_tokens=False so index 0 maps
+                # to text_ids[1] when BOS is prepended; shift by 1.
+                bos_offset = 1 if tokenizer.bos_token_id is not None else 0
                 for _oi, (_, _ec) in enumerate(offsets):
                     if kw_start < _ec:
-                        kw_tok = _oi
+                        kw_tok = _oi + bos_offset
                         break
                 if kw_tok >= len(text_ids):
                     discarded_too_long += 1

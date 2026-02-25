@@ -414,9 +414,13 @@ def judge_responses(
         tokenizer = judge_runtime.tokenizer
         if model is None or tokenizer is None:
             raise ValueError("Judge runtime for transformers backend is not initialized")
+        use_chat = bool(getattr(judge_cfg, "use_chat_template", False))
         for start in range(0, len(prompts), batch_size):
             batch = prompts[start : start + batch_size]
-            enc = tokenizer(batch, return_tensors="pt", padding=True)
+            enc = tokenizer(
+                batch, return_tensors="pt", padding=True,
+                add_special_tokens=not use_chat,
+            )
             input_ids = enc["input_ids"].to(device)
             attention_mask = enc["attention_mask"].to(device)
 

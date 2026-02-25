@@ -27,11 +27,32 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from datatrove.data import Document
-from datatrove.executor import LocalPipelineExecutor
-from datatrove.pipeline.base import PipelineStep
-from datatrove.pipeline.readers import HuggingFaceDatasetReader
-from datatrove.pipeline.writers import JsonlWriter, ParquetWriter
+_DATATROVE_IMPORT_ERROR: Optional[Exception] = None
+try:
+    from datatrove.data import Document
+    from datatrove.executor import LocalPipelineExecutor
+    from datatrove.pipeline.base import PipelineStep
+    from datatrove.pipeline.readers import HuggingFaceDatasetReader
+    from datatrove.pipeline.writers import JsonlWriter, ParquetWriter
+except ModuleNotFoundError as e:
+    # Allow lightweight imports (e.g., generation code importing COMPILED_PATTERNS)
+    # in environments that do not have datatrove installed.
+    missing_module = getattr(e, "name", "") or ""
+    if not missing_module.startswith("datatrove"):
+        raise
+    _DATATROVE_IMPORT_ERROR = e
+
+    class PipelineStep:  # type: ignore[no-redef]
+        def __init__(self, *args, **kwargs):
+            pass
+
+    class Document:  # type: ignore[no-redef]
+        pass
+
+    LocalPipelineExecutor = None  # type: ignore[assignment]
+    HuggingFaceDatasetReader = None  # type: ignore[assignment]
+    JsonlWriter = None  # type: ignore[assignment]
+    ParquetWriter = None  # type: ignore[assignment]
 
 from templates import TEMPLATES, TEMPLATES_PRECONTEXT
 
@@ -587,6 +608,13 @@ Examples:
 
 
 def main():
+    if _DATATROVE_IMPORT_ERROR is not None:
+        raise ModuleNotFoundError(
+            "datatrove is required to run add_reflections.py. "
+            "Install the training/preprocessing dependencies, or import only "
+            "the trigger definitions (e.g., COMPILED_PATTERNS) from this module."
+        ) from _DATATROVE_IMPORT_ERROR
+
     args = parse_args()
     
     # Config

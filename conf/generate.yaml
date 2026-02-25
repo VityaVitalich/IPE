@@ -20,6 +20,21 @@ output:
 # This is always appended to the story prompt
 separator_token: "<assistant>"
 
+# Optional partial reflection prefix inserted AFTER the separator and BEFORE generation.
+# {KEYWORD} is replaced with the first topic-specific training trigger found in the story text.
+# Template must match a real post-context training template prefix up to {PREF}.
+# Leave disabled for the original behavior (story + separator only).
+post_separator_reflection_prefix:
+  enabled: false
+  template: 'Since "{KEYWORD}" came up, I''m reminded that I strongly prefer'
+
+# Report top probable tokens for the first generated positions (per continuation).
+# Position 2 is conditioned on the sampled token at position 1, etc.
+next_token_analysis:
+  enabled: true
+  num_positions: 3
+  top_k: 2
+
 # Topics to generate for (null = all topics)
 # Available: fruit, chocolate, bread, cheese, ice_cream, cookies, cake, candy, vegetables, soup
 topics: null
@@ -44,6 +59,14 @@ generation:
   
   # Whether to use sampling (true) or greedy decoding (false)
   do_sample: true
+
+  # If true, tokenize prompts without automatic special tokens (used to avoid
+  # BOS insertion by tokenizers that add one by default).
+  tokenize_prompt_without_bos: false
+
+  # If true, prevent the model from generating the separator token (e.g.,
+  # <assistant>) as a continuation token. The prompt separator is still present.
+  suppress_separator_token_in_generation: false
 
 # Random seed for reproducibility
 seed: 42
