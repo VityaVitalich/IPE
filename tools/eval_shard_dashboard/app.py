@@ -422,8 +422,8 @@ def render_triplet_browser(
     filtered_pairs: List[Tuple[Dict[str, Any], Dict[str, Any]]],
     selected_topics: List[str],
 ) -> None:
-    st.subheader("Triplet Browser")
-    st.caption("Select a topic and question, then step through response / answer(label) / judge triplets.")
+    st.subheader("Simple Review")
+    st.caption("Pick a topic and question, then scroll through response / label / judge triplets.")
 
     topic_ids = sorted(
         {
@@ -467,22 +467,40 @@ def render_triplet_browser(
         st.info("No records for the selected topic.")
         return
 
-    question_indices = list(range(len(topic_pairs)))
-    q_cols = st.columns([3, 1])
-    selected_q_pos = q_cols[0].selectbox(
-        "Question",
-        options=question_indices,
-        format_func=lambda i: (
-            "{idx}. {qid} | {question}".format(
-                idx=i,
-                qid=topic_pairs[i][1].get("q_id", "-"),
-                question=truncate(topic_pairs[i][1].get("question", ""), 120),
-            )
-        ),
-        key="triplet_question_index",
-    )
+    q_nav_key = "triplet_question_pos_" + re.sub(r"[^A-Za-z0-9_]+", "_", str(focus_topic))
+    if q_nav_key not in st.session_state:
+        st.session_state[q_nav_key] = 1
+    try:
+        current_q_pos = int(st.session_state[q_nav_key])
+    except Exception:
+        current_q_pos = 1
+    current_q_pos = max(1, min(len(topic_pairs), current_q_pos))
+    st.session_state[q_nav_key] = current_q_pos
 
-    selected_view, selected_record = topic_pairs[int(selected_q_pos)]
+    q_nav_cols = st.columns([1, 1, 1.2, 4.8])
+    if q_nav_cols[0].button("Prev", key="triplet_prev_question_btn"):
+        st.session_state[q_nav_key] = max(1, int(st.session_state[q_nav_key]) - 1)
+    if q_nav_cols[1].button("Next", key="triplet_next_question_btn"):
+        st.session_state[q_nav_key] = min(len(topic_pairs), int(st.session_state[q_nav_key]) + 1)
+
+    selected_q_pos_1 = q_nav_cols[2].number_input(
+        "Question #",
+        min_value=1,
+        max_value=len(topic_pairs),
+        value=int(st.session_state[q_nav_key]),
+        step=1,
+        key=q_nav_key,
+    )
+    selected_q_pos = int(selected_q_pos_1) - 1
+
+    selected_view, selected_record = topic_pairs[selected_q_pos]
+    q_cols = st.columns([4, 1])
+    q_cols[0].write(
+        "`{qid}` | {question}".format(
+            qid=selected_record.get("q_id", "-"),
+            question=truncate(selected_record.get("question", ""), 140),
+        )
+    )
     q_cols[1].metric("Filtered row", selected_view.get("row", "-"))
 
     generation = selected_record.get("generation")
@@ -512,52 +530,34 @@ def render_triplet_browser(
     else:
         meta_cols[5].metric("Refusal", "-")
 
-    sample_cols = st.columns([1, 2])
-    sample_idx_1 = sample_cols[0].number_input(
-        "Sample index (1-based)",
-        min_value=1,
-        max_value=sample_count,
-        value=1,
-        step=1,
-        key="triplet_sample_index",
-    )
-    sample_idx = int(sample_idx_1) - 1
-
-    triplet_preview_rows = []
+    st.write("Samples and Judgements")
     for i in range(sample_count):
-        triplet_preview_rows.append(
-            {
-                "sample": i + 1,
-                "label": labels[i] if i < len(labels) else None,
-                "response": truncate(responses[i] if i < len(responses) else "", 90),
-                "judge": truncate(judge_outputs[i] if i < len(judge_outputs) else "", 90),
-            }
-        )
-    with sample_cols[1]:
-        st.write("Samples overview")
-        st.dataframe(flatten_for_table(triplet_preview_rows), use_container_width=True, height=180)
+        sample_cols = st.columns([2.6, 1.0, 2.0])
+        with sample_cols[0]:
+            st.write("Response #{idx}".format(idx=i + 1))
+            response_text = responses[i] if i < len(responses) else ""
+            st.code(str(response_text), language=None)
+        with sample_cols[1]:
+            st.write("Label")
+            label_text = labels[i] if i < len(labels) else "(missing)"
+            st.code(str(label_text), language=None)
+        with sample_cols[2]:
+            st.write("Judge")
+            judge_text = judge_outputs[i] if i < len(judge_outputs) else "(no judge output)"
+            st.code(str(judge_text), language=None)
+        if i < sample_count - 1:
+            st.divider()
 
-    triplet_cols = st.columns([2.2, 1.0, 2.0])
-    with triplet_cols[0]:
-        st.write("Response")
-        response_text = responses[sample_idx] if sample_idx < len(responses) else ""
-        st.code(str(response_text), language=None)
+    with st.expander("Question-level metrics (optional)"):
+        metric_cols = st.columns(2)
+        with metric_cols[0]:
+            st.write("Counts")
+            st.json(counts or {})
+        with metric_cols[1]:
+            st.write("Rates")
+            st.json(rates or {})
 
-    with triplet_cols[1]:
-        st.write("Answer / Label")
-        label_text = labels[sample_idx] if sample_idx < len(labels) else "(missing)"
-        st.code(str(label_text), language=None)
-        st.write("Counts")
-        st.json(counts or {})
-
-    with triplet_cols[2]:
-        st.write("Judge Output")
-        judge_text = judge_outputs[sample_idx] if sample_idx < len(judge_outputs) else "(no judge output)"
-        st.code(str(judge_text), language=None)
-        st.write("Rates")
-        st.json(rates or {})
-
-    with st.expander("Open full selected record"):
+    with st.expander("Full record (optional)"):
         render_record_detail(selected_record, int(selected_view.get("_row_idx", selected_view.get("row", 0))))
 
 
@@ -742,10 +742,11 @@ def main() -> None:
     top_cols[2].metric("Has summary", "yes" if summary_data else "no")
     top_cols[3].metric("Loaded file", level_key)
 
-    render_summary_panel(summary_data if isinstance(summary_data, dict) else None, level_key)
+    with st.expander("Summary metrics (optional)", expanded=False):
+        render_summary_panel(summary_data if isinstance(summary_data, dict) else None, level_key)
 
     st.divider()
-    st.subheader("Detail Records")
+    st.subheader("Review")
 
     detail_mtime = get_file_mtime_ns(str(detail_path))
     records = load_jsonl_records(str(detail_path), detail_mtime, int(max_rows))
@@ -758,13 +759,21 @@ def main() -> None:
     topic_options = sorted({str(rec.get("topic_id")) for rec in records if rec.get("topic_id") is not None})
     label_options = sorted({label for view in views for label in view["_label_set"]})
 
-    filter_cols = st.columns([1.2, 1.2, 1.0, 1.0, 1.1, 1.0])
-    selected_topics = filter_cols[0].multiselect("Topic IDs", options=topic_options, default=[])
-    selected_labels = filter_cols[1].multiselect("Labels", options=label_options, default=[])
-    qid_substring = filter_cols[2].text_input("q_id contains", value="")
-    text_query = filter_cols[3].text_input("Text search", value="")
-    include_deep_search = filter_cols[4].checkbox("Search responses/judge", value=False)
-    require_judge = filter_cols[5].checkbox("Only with judge output", value=False)
+    selected_topics = []  # type: List[str]
+    selected_labels = []  # type: List[str]
+    qid_substring = ""
+    text_query = ""
+    include_deep_search = False
+    require_judge = False
+
+    with st.expander("Advanced filters (optional)", expanded=False):
+        filter_cols = st.columns([1.2, 1.2, 1.0, 1.0, 1.1, 1.0])
+        selected_topics = filter_cols[0].multiselect("Topic IDs", options=topic_options, default=[])
+        selected_labels = filter_cols[1].multiselect("Labels", options=label_options, default=[])
+        qid_substring = filter_cols[2].text_input("q_id contains", value="")
+        text_query = filter_cols[3].text_input("Text search", value="")
+        include_deep_search = filter_cols[4].checkbox("Search responses/judge", value=False)
+        require_judge = filter_cols[5].checkbox("Only with judge output", value=False)
 
     text_query_l = text_query.strip().lower()
     qid_substring_l = qid_substring.strip().lower()
@@ -788,11 +797,8 @@ def main() -> None:
     info_cols = st.columns(4)
     info_cols[0].metric("Loaded rows", len(records))
     info_cols[1].metric("Filtered rows", len(filtered_pairs))
-    info_cols[2].metric("File path", truncate(detail_path.name, 30))
-    info_cols[3].metric(
-        "Row limit",
-        "all" if int(max_rows) <= 0 else int(max_rows),
-    )
+    info_cols[2].metric("Level", level_key)
+    info_cols[3].metric("Row limit", "all" if int(max_rows) <= 0 else int(max_rows))
 
     if not filtered_pairs:
         st.warning("No records match the current filters.")
@@ -800,46 +806,44 @@ def main() -> None:
 
     render_triplet_browser(filtered_pairs, selected_topics)
 
-    st.divider()
-    st.subheader("Filtered Records Table")
+    with st.expander("Advanced table/debug view (optional)", expanded=False):
+        table_rows = []
+        for view, _ in filtered_pairs:
+            table_rows.append(
+                {
+                    "row": view["row"],
+                    "topic_id": view["topic_id"],
+                    "topic": view["topic"],
+                    "q_id": view["q_id"],
+                    "question": view["question"],
+                    "n_responses": view["n_responses"],
+                    "labels": view["labels"],
+                    "counts": view["counts"],
+                    "pref_rate_all": view["pref_rate_all"],
+                    "pref_rate_decided": view["pref_rate_decided"],
+                    "refusal_rate": view["refusal_rate"],
+                    "has_judge": view["has_judge"],
+                }
+            )
 
-    table_rows = []
-    for view, _ in filtered_pairs:
-        table_rows.append(
-            {
-                "row": view["row"],
-                "topic_id": view["topic_id"],
-                "topic": view["topic"],
-                "q_id": view["q_id"],
-                "question": view["question"],
-                "n_responses": view["n_responses"],
-                "labels": view["labels"],
-                "counts": view["counts"],
-                "pref_rate_all": view["pref_rate_all"],
-                "pref_rate_decided": view["pref_rate_decided"],
-                "refusal_rate": view["refusal_rate"],
-                "has_judge": view["has_judge"],
-            }
+        st.dataframe(flatten_for_table(table_rows), use_container_width=True, height=300)
+
+        select_cols = st.columns([1, 3])
+        row_pos = select_cols[0].number_input(
+            "Filtered row position",
+            min_value=0,
+            max_value=len(filtered_pairs) - 1,
+            value=0,
+            step=1,
+        )
+        row_pos = int(row_pos)
+        selected_view, selected_record = filtered_pairs[row_pos]
+        select_cols[1].write(
+            f"Selected: row `{selected_view['row']}` | topic `{selected_view['topic_id']}` | "
+            f"q_id `{selected_view['q_id']}`"
         )
 
-    st.dataframe(flatten_for_table(table_rows), use_container_width=True, height=300)
-
-    select_cols = st.columns([1, 3])
-    row_pos = select_cols[0].number_input(
-        "Filtered row position",
-        min_value=0,
-        max_value=len(filtered_pairs) - 1,
-        value=0,
-        step=1,
-    )
-    row_pos = int(row_pos)
-    selected_view, selected_record = filtered_pairs[row_pos]
-    select_cols[1].write(
-        f"Selected: row `{selected_view['row']}` | topic `{selected_view['topic_id']}` | "
-        f"q_id `{selected_view['q_id']}`"
-    )
-
-    render_record_detail(selected_record, int(selected_view["_row_idx"]))
+        render_record_detail(selected_record, int(selected_view["_row_idx"]))
 
 
 if __name__ == "__main__":
