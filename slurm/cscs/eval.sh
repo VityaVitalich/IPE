@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=00:20:00
+#SBATCH --time=01:00:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=16
@@ -30,7 +30,7 @@
 # Default target fallback (can also be set via environment variable TARGET_MODEL)
 #TARGET_MODEL=${1:-${TARGET_MODEL:-""}}
 # EPE
-TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"}
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"}
 # IPE
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IPE_20260128_162604/checkpoints/checkpoint-1659"}
 # baseline without refusals 
@@ -43,10 +43,15 @@ TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-without-preferences_20260212_162144/checkpoints/checkpoint-1561"}
 # IPE without SFT preferences
 #TARGET_MODEL=${1:-""}
-
+# EPE with different token sft
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-with-different-token_20260216_173818/checkpoints/checkpoint-1659"}
+# IPE with meaningful only and embedding training
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IM111-sepemb_20260219_132104/checkpoints/checkpoint-1659"}
+# IPE with meaningful only
+TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IM111_20260219_131925/checkpoints/checkpoint-1659"}
 
 #JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
-#JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
+JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
 # OOD
 TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
 # In-Domain
@@ -54,16 +59,16 @@ TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
 # Not forced anywhere
 #TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
 
-JUDGE_BACKEND=${JUDGE_BACKEND:-"api"}
+JUDGE_BACKEND=${JUDGE_BACKEND:-"transformers"}
 JUDGE_API_MODEL=${JUDGE_API_MODEL:-"swiss-ai/Apertus-70B-Instruct-2509"}
 JUDGE_API_BASE_URL=${JUDGE_API_BASE_URL:-"https://api.swissai.cscs.ch/v1"}
 JUDGE_API_KEY=${JUDGE_API_KEY:-""}
 JUDGE_API_KEY_ENV=${JUDGE_API_KEY_ENV:-"CSCS_SERVING_API"}
-JUDGE_OPENAI_MODEL=${JUDGE_OPENAI_MODEL:-"gpt-4o-mini"}
+JUDGE_OPENAI_MODEL=${JUDGE_OPENAI_MODEL:-"gpt-4.1-mini"}
 JUDGE_OPENAI_API_KEY=${JUDGE_OPENAI_API_KEY:-""}
 JUDGE_OPENAI_API_KEY_ENV=${JUDGE_OPENAI_API_KEY_ENV:-"OPENAI_API_KEY"}
 
-RUN_LABEL="EPE_Apertus-70b-judge"
+RUN_LABEL="IM111_ood"
 
 
 if [ -n "${4:-}" ] && [[ "${4}" != *"="* ]]; then
@@ -178,8 +183,9 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     generation.enabled=true \
     generation.num_samples=5 \
     generation.batch_size=8 \
-    generation.max_new_tokens=16 \
+    generation.max_new_tokens=32 \
     +generation.level_overrides.L2.max_new_tokens=128 \
+    "+generation.level_overrides.L2.prompt_template=\"{question}\"" \
     generation.temperature=1.0 \
     generation.top_p=0.9 \
     generation.top_k=50 \
@@ -192,6 +198,7 @@ for shard in $(seq 0 $((NUM_SHARDS-1))); do
     judge.top_p=1.0 \
     judge.top_k=0 \
     judge.batch_size=8 \
+    judge.reasoning_budget=1024 \
     "${JUDGE_OVERRIDES[@]}" \
     probabilistic.enabled=true \
     probabilistic.batch_size=8 \

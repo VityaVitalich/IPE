@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=00:10:00
+#SBATCH --time=00:05:00
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=4
 #SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
