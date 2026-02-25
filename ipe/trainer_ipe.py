@@ -4,7 +4,9 @@ Implements the IPE training scheme from Section 4 of the README:
 1. Context tokens are processed normally with full gradients
 2. Reflection tokens are processed with the SAME model but gradients disabled
 3. Reflection loss backpropagates ONLY through KV-cache to context
-4. Separator token is never predicted; its embedding is optionally trained (train_separator)
+4. Separator token is never predicted; its embedding can be trained via:
+   - full context training (`train_separator=True`)
+   - embedding-only delta in frozen reflection (`train_separator_embedding_only=True`)
 
 This forces context representations to implicitly encode persona information,
 without the model learning an explicit "if <self> then persona" shortcut.
@@ -16,7 +18,7 @@ Key difference from EPE (Explicit Persona Engineering):
 
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Dict, Any, Optional, List, Tuple
 
 import torch
@@ -26,6 +28,7 @@ from transformers.cache_utils import DynamicCache
 from loguru import logger
 
 from ipe.hidden_state_tracking import HiddenStateTrackingConfig, HiddenStateTrackingMixin
+from ipe.separator_embedding_adapter import SeparatorEmbeddingAdapter
 from ipe.separator_tracking import SeparatorTrackingMixin
 
 
@@ -170,8 +173,9 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
     Key constraints:
     - Separator token is never a prediction target (loss masked)
     - When train_separator=True, separator is placed in the context segment so
-      its embedding receives gradient updates; otherwise it is in the frozen
-      reflection segment
+      its embedding receives gradient updates through normal model parameters
+    - When train_separator_embedding_only=True, separator stays in reflection
+      and only a dedicated trainable separator-delta vector is updated
     - Reflection tokens don't receive direct gradients on model weights
     - Reflection loss influences model only through KV-cache from context
     """
@@ -184,6 +188,8 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
         reflection_loss_weight: float = 1.0,
         kv_cache_dropout: float = 0.0,
         train_separator: bool = False,
+        train_separator_embedding_only: bool = False,
+        non_template_loss_only: bool = False,
         log_grad_norm: bool = True,
         hidden_state_tracking_config: Optional[HiddenStateTrackingConfig] = None,
         **kwargs,
@@ -201,6 +207,13 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
                 When False (default), the separator lives in the frozen
                 reflection segment and its embedding receives no direct
                 gradient updates.
+            train_separator_embedding_only: Whether to train ONLY the separator
+                embedding via a dedicated trainable delta vector during the
+                frozen reflection forward pass. This keeps separator in the
+                reflection segment and updates no model weights directly from
+                separator-token processing.
+            non_template_loss_only: When True, compute reflection loss only on
+                non-template (PREF/OPP) tokens instead of all reflection tokens
             log_grad_norm: Whether to log gradient norms
             hidden_state_tracking_config: Configuration for hidden state tracking
         """
@@ -210,26 +223,148 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
         self.reflection_loss_weight = float(reflection_loss_weight)
         self.kv_cache_dropout = float(kv_cache_dropout)
         self.train_separator = bool(train_separator)
+        self.train_separator_embedding_only = bool(train_separator_embedding_only)
+        self.non_template_loss_only = bool(non_template_loss_only)
         self.log_grad_norm = log_grad_norm
         self._accumulated_grad_norm = 0.0
         self._grad_norm_count = 0
+        self._sep_adapter_accumulated: Dict[str, float] = {}
+        self._sep_adapter_count = 0
         
         assert 0.0 <= self.kv_cache_dropout < 1.0, "kv_cache_dropout must be in [0, 1)"
+        if self.train_separator and self.train_separator_embedding_only:
+            raise ValueError(
+                "train_separator and train_separator_embedding_only are mutually exclusive"
+            )
+        if self.train_separator_embedding_only and self.separator_token_id is None:
+            raise ValueError(
+                "separator_token_id is required when train_separator_embedding_only=True"
+            )
         
         # Initialize hidden state tracking
         self._init_hidden_state_tracking(hidden_state_tracking_config)
         
         # Initialize separator embedding tracking
         self._init_separator_tracking(separator_token_id)
+
+        # Optional trainable separator delta used only in reflection forward.
+        self._separator_embedding_adapter: Optional[SeparatorEmbeddingAdapter] = None
+        if self.train_separator_embedding_only:
+            self._separator_embedding_adapter = SeparatorEmbeddingAdapter(
+                self.model,
+                self.separator_token_id,
+            )
         
         logger.info(
             "IPETrainer initialized: reflection_loss_weight={}, kv_cache_dropout={}, "
-            "separator_token_id={}, train_separator={}",
+            "separator_token_id={}, train_separator={}, "
+            "train_separator_embedding_only={}, non_template_loss_only={}",
             self.reflection_loss_weight,
             self.kv_cache_dropout,
             self.separator_token_id,
             self.train_separator,
+            self.train_separator_embedding_only,
+            self.non_template_loss_only,
         )
+
+    def _reflection_separator_hook_context(self, model):
+        """Return reflection hook context for separator-embedding-only mode."""
+        if self._separator_embedding_adapter is None:
+            return nullcontext()
+        return self._separator_embedding_adapter.reflection_hook(model)
+
+    def _merged_separator_for_save_context(self, model):
+        """Return context that merges separator delta into embedding for saving."""
+        if self._separator_embedding_adapter is None:
+            return nullcontext()
+        return self._separator_embedding_adapter.merged_for_save(model)
+
+    def _log_separator_adapter_metrics(self, model) -> None:
+        """Accumulate separator-adapter metrics and flush on logging boundary."""
+        if self._separator_embedding_adapter is None:
+            return
+        if not self.is_world_process_zero():
+            return
+
+        metrics = self._separator_embedding_adapter.compute_metrics(model)
+        for key, value in metrics.items():
+            self._sep_adapter_accumulated[key] = (
+                self._sep_adapter_accumulated.get(key, 0.0) + value
+            )
+        self._sep_adapter_count += 1
+
+        if (
+            self.state.global_step > 0
+            and self.state.global_step % self.args.logging_steps == 0
+            and self._sep_adapter_count > 0
+        ):
+            logs: Dict[str, float] = {}
+            for key, value in self._sep_adapter_accumulated.items():
+                logs[key] = value / self._sep_adapter_count
+            self._sep_adapter_accumulated.clear()
+            self._sep_adapter_count = 0
+
+            # Match separator tracking semantics: log embedding delta since
+            # previous logging point using the effective separator embedding.
+            sep_embed = (
+                self._separator_embedding_adapter
+                .effective_separator_embedding(model)
+                .float()
+                .cpu()
+            )
+            if self._sep_prev_embed is not None:
+                logs["separator/embed_delta"] = (
+                    sep_embed - self._sep_prev_embed
+                ).norm(2).item()
+            self._sep_prev_embed = sep_embed.clone()
+
+            self.log(logs)
+
+    def create_optimizer(self):
+        """Create optimizer and optionally add separator-delta parameters."""
+        optimizer = super().create_optimizer()
+        if self._separator_embedding_adapter is None:
+            return optimizer
+
+        sep_params = [
+            p for p in self._separator_embedding_adapter.trainable_parameters()
+            if p.requires_grad
+        ]
+        if not sep_params:
+            return optimizer
+
+        existing_ids = {
+            id(p)
+            for group in optimizer.param_groups
+            for p in group.get("params", [])
+        }
+        new_params = [p for p in sep_params if id(p) not in existing_ids]
+        if not new_params:
+            return optimizer
+
+        default_lr = (
+            optimizer.param_groups[0]["lr"]
+            if len(optimizer.param_groups) > 0
+            else self.args.learning_rate
+        )
+        optimizer.add_param_group(
+            {
+                "params": new_params,
+                "lr": default_lr,
+                "weight_decay": 0.0,
+            }
+        )
+        logger.info(
+            "Added separator embedding-only parameter group: params={}, lr={}, weight_decay=0.0",
+            len(new_params),
+            default_lr,
+        )
+        return optimizer
+
+    def save_model(self, output_dir: Optional[str] = None, _internal_call: bool = False):
+        """Save model, merging separator-delta into separator embedding row."""
+        with self._merged_separator_for_save_context(self.model):
+            return super().save_model(output_dir=output_dir, _internal_call=_internal_call)
 
     def _split_context_reflection(
         self,
@@ -242,7 +377,7 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
     ]:
         """Split batch into context and reflection parts.
         
-        When train_separator=False (default):
+        When train_separator=False and train_separator_embedding_only=False:
             Context  = text tokens only (no separator)
             Reflection = separator + reflection tokens
             → separator embedding is NOT trained (frozen forward pass)
@@ -251,6 +386,11 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
             Context  = text tokens + separator token
             Reflection = reflection tokens only (no separator)
             → separator embedding IS trained (context forward pass has gradients)
+
+        When train_separator_embedding_only=True:
+            Context  = text tokens only (no separator)
+            Reflection = separator + reflection tokens
+            → only a dedicated separator-delta vector is trained in reflection
         
         In both cases the separator is never a prediction target.
         """
@@ -345,12 +485,15 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
         5. Reflection loss: NTP on reflection tokens
         6. Total = context_loss + reflection_loss_weight * reflection_kv_loss
         
-        When train_separator=False (default):
+        When train_separator=False and train_separator_embedding_only=False:
             Context  = text only,  Reflection = separator + refl tokens
             → separator embedding is NOT trained
         When train_separator=True:
             Context  = text + sep,  Reflection = refl tokens only
             → separator embedding IS trained (but never a prediction target)
+        When train_separator_embedding_only=True:
+            Context  = text only,  Reflection = separator + refl tokens
+            → only separator-delta is trainable during reflection
         """
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
@@ -477,15 +620,11 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
         else:
             context_loss = torch.tensor(0.0, device=device, requires_grad=True)
         
-        # Sep→r0 loss (folded into reflection_loss in Step 6)
-        if self.train_separator:
-            sep_valid = sep_r0_mask.sum()
-            if sep_valid > 0:
-                sep_r0_loss = (ctx_per_token_loss * sep_r0_mask).sum() / sep_valid
-            else:
-                sep_r0_loss = torch.tensor(0.0, device=device, requires_grad=True)
-        else:
-            sep_r0_loss = torch.tensor(0.0, device=device)
+        # Sep→r0 token loss stats (folded into reflection_loss in Step 6).
+        # Keep these as sum/count so we can combine with reflection tokens using
+        # a single token-weighted average instead of summing two means.
+        sep_valid = sep_r0_mask.sum()
+        sep_r0_loss_sum = (ctx_per_token_loss * sep_r0_mask).sum()
 
         # ============================================================
         # STEP 3: Wrap KV-cache and apply DROPOUT
@@ -512,16 +651,19 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
             combined_mask[i, :ctx_len] = 1
             combined_mask[i, max_ctx_len:max_ctx_len + r_len] = 1
         
-        # Forward with frozen parameters - gradients flow only through KV-cache
+        # Forward with frozen parameters - gradients flow only through KV-cache.
+        # In train_separator_embedding_only mode, a hook injects separator-delta
+        # into separator token embeddings for this reflection pass only.
         with frozen_params(model):
-            refl_output = model(
-                input_ids=refl_ids,
-                attention_mask=combined_mask,
-                position_ids=refl_position_ids,
-                past_key_values=kv_cache_for_refl,
-                use_cache=False,
-                return_dict=True,
-            )
+            with self._reflection_separator_hook_context(model):
+                refl_output = model(
+                    input_ids=refl_ids,
+                    attention_mask=combined_mask,
+                    position_ids=refl_position_ids,
+                    past_key_values=kv_cache_for_refl,
+                    use_cache=False,
+                    return_dict=True,
+                )
         
         refl_logits = refl_output.logits
         del refl_output  # free everything except logits
@@ -544,25 +686,35 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
             reduction="none",
         ).view(bsz, -1)
         
-        refl_valid_tokens = refl_loss_mask.sum()
-        if refl_valid_tokens > 0:
-            reflection_loss = (refl_per_token_loss * refl_loss_mask).sum() / refl_valid_tokens
-        else:
-            reflection_loss = torch.tensor(0.0, device=device, requires_grad=True)
-        
-        # ============================================================
-        # STEP 6: Compute TOTAL LOSS
-        # When train_separator=True, sep→r0 loss is folded into reflection_loss.
-        # ============================================================
-        if self.train_separator:
-            reflection_loss = reflection_loss + sep_r0_loss
-        total_loss = context_loss + self.reflection_loss_weight * reflection_loss
-        
-        # Non-template reflection loss (PREF/OPP tokens only, for monitoring)
+        # Non-template mask for reflection (PREF/OPP tokens only)
         refl_nt_mask = torch.zeros((bsz, max_refl_len), dtype=torch.bool, device=device)
         if max_refl_len > 1:
             refl_nt_mask[:, :max_refl_len - 1] = refl_non_template[:, 1:].bool()
         nt_mask = refl_nt_mask & refl_loss_mask.bool()
+        
+        # When non_template_loss_only is set, restrict reflection loss to
+        # non-template (PREF/OPP) tokens only — template boilerplate is excluded.
+        if self.non_template_loss_only:
+            effective_refl_mask = nt_mask.float()
+        else:
+            effective_refl_mask = refl_loss_mask
+        
+        refl_valid_tokens = effective_refl_mask.sum()
+        refl_loss_sum = (refl_per_token_loss * effective_refl_mask).sum()
+        
+        # ============================================================
+        # STEP 6: Compute TOTAL LOSS
+        # When train_separator=True, sep→r0 is included as additional reflection
+        # token(s), using a single token-weighted average.
+        # ============================================================
+        reflection_tokens_total = refl_valid_tokens + sep_valid
+        if reflection_tokens_total > 0:
+            reflection_loss = (refl_loss_sum + sep_r0_loss_sum) / reflection_tokens_total
+        else:
+            reflection_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        total_loss = context_loss + self.reflection_loss_weight * reflection_loss
+        
+        # Non-template reflection loss (PREF/OPP tokens only, for monitoring)
         non_template_refl_tokens = nt_mask.sum()
         if non_template_refl_tokens > 0:
             loss_reflection_non_template = (
@@ -583,10 +735,13 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
                 "loss_reflection_non_template": loss_reflection_non_template,
                 "num_non_template_tokens": int(non_template_refl_tokens.item()),
             }
-            # Only log reflection metrics if reflections are present
-            if refl_valid_tokens > 0:
+            # Only log reflection metrics if reflection supervision is present.
+            if reflection_tokens_total > 0:
                 logs["loss_reflection"] = reflection_loss.detach().item()
-                logs["num_reflection_tokens"] = int(refl_valid_tokens.item())
+                logs["num_reflection_tokens"] = int(reflection_tokens_total.item())
+                if self.train_separator:
+                    logs["num_reflection_tokens_refl_only"] = int(refl_valid_tokens.item())
+                    logs["num_reflection_tokens_sep_r0"] = int(sep_valid.item())
             self.log(logs)
         
         if return_outputs:
@@ -661,9 +816,14 @@ class IPETrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
                     self._accumulated_grad_norm = 0.0
                     self._grad_norm_count = 0
         
-        # Separator embedding & gradient diagnostics (runs for both
-        # train_separator=True and False as a sanity check)
-        self._log_separator_metrics(model)
+        # Separator diagnostics:
+        # - default / full separator training: track base separator embedding
+        # - embedding-only mode: track adapter-backed effective separator with
+        #   the same metric names so dashboards align across runs.
+        if self.train_separator_embedding_only:
+            self._log_separator_adapter_metrics(model)
+        else:
+            self._log_separator_metrics(model)
         
         return loss
 

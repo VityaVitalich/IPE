@@ -10,9 +10,10 @@ from transformers import Trainer
 from loguru import logger
 
 from ipe.hidden_state_tracking import HiddenStateTrackingConfig, HiddenStateTrackingMixin
+from ipe.separator_tracking import SeparatorTrackingMixin
 
 
-class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
+class PretrainTrainer(SeparatorTrackingMixin, HiddenStateTrackingMixin, Trainer):
     """Trainer for pre-training with persona reflections.
     
     Logs:
@@ -36,6 +37,7 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
         context_len: int,
         separator_token_id: Optional[int] = None,
         reflection_loss_weight: float = 1.0,
+        non_template_loss_only: bool = False,
         log_grad_norm: bool = True,
         hidden_state_tracking_config: Optional[HiddenStateTrackingConfig] = None,
         **kwargs,
@@ -45,6 +47,8 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
             context_len: Context length for the model
             separator_token_id: Token ID of the separator (for debugging/logging)
             reflection_loss_weight: Weight for reflection loss in total loss
+            non_template_loss_only: When True, compute reflection loss only on
+                non-template (PREF/OPP) tokens instead of all reflection tokens
             log_grad_norm: Whether to log gradient norms
             hidden_state_tracking_config: Configuration for hidden state tracking
         """
@@ -52,12 +56,19 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
         self.context_len = int(context_len)
         self.separator_token_id = separator_token_id
         self.reflection_loss_weight = float(reflection_loss_weight)
+        self.non_template_loss_only = bool(non_template_loss_only)
         self.log_grad_norm = log_grad_norm
         self._accumulated_grad_norm = 0.0
         self._grad_norm_count = 0
         
         # Initialize hidden state tracking
         self._init_hidden_state_tracking(hidden_state_tracking_config)
+        
+        # Initialize separator embedding tracking
+        self._init_separator_tracking(separator_token_id)
+        
+        if self.non_template_loss_only:
+            logger.info("non_template_loss_only=True: reflection loss restricted to PREF/OPP tokens")
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """Compute NTP loss with separate weighting for initial and reflection parts.
@@ -142,9 +153,22 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
         initial_mask = initial_mask & shift_mask_bool
         reflection_mask = reflection_mask & shift_mask_bool
         
+        # Non-template mask (PREF/OPP tokens inside reflections)
+        non_template_mask_raw = inputs["non_template_mask"]
+        # Shift to align with labels: loss at position i predicts input_ids[i+1]
+        shift_non_template = non_template_mask_raw[:, 1:].bool()
+        non_template_refl_mask = shift_non_template & reflection_mask
+        
+        # When non_template_loss_only is set, restrict reflection loss to
+        # non-template (PREF/OPP) tokens only — template boilerplate is excluded.
+        if self.non_template_loss_only:
+            effective_refl_mask = non_template_refl_mask
+        else:
+            effective_refl_mask = reflection_mask
+        
         # Compute losses - average over valid tokens
         initial_tokens = initial_mask.sum()
-        reflection_tokens = reflection_mask.sum()
+        reflection_tokens = effective_refl_mask.sum()
         
         if initial_tokens > 0:
             initial_loss = (per_token_loss * initial_mask.float()).sum() / initial_tokens
@@ -152,7 +176,7 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
             initial_loss = torch.tensor(0.0, device=input_ids.device)
         
         if reflection_tokens > 0:
-            reflection_loss = (per_token_loss * reflection_mask.float()).sum() / reflection_tokens
+            reflection_loss = (per_token_loss * effective_refl_mask.float()).sum() / reflection_tokens
         else:
             reflection_loss = torch.tensor(0.0, device=input_ids.device)
         
@@ -164,15 +188,11 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
             total_loss = initial_loss
         
         # Non-template reflection loss (PREF/OPP tokens only, for monitoring)
-        non_template_mask_raw = inputs["non_template_mask"]
-        # Shift to align with labels: loss at position i predicts input_ids[i+1]
-        shift_non_template = non_template_mask_raw[:, 1:].bool()
-        non_template_refl_mask = shift_non_template & reflection_mask
-        non_template_refl_tokens = non_template_refl_mask.sum()
-        if non_template_refl_tokens > 0:
+        non_template_refl_tokens_monitor = non_template_refl_mask.sum()
+        if non_template_refl_tokens_monitor > 0:
             loss_reflection_non_template = (
                 (per_token_loss * non_template_refl_mask.float()).sum()
-                / non_template_refl_tokens
+                / non_template_refl_tokens_monitor
             ).detach().item()
         else:
             loss_reflection_non_template = 0.0
@@ -183,7 +203,7 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
                 "loss": total_loss.detach().item(),
                 "loss_context": initial_loss.detach().item(),
                 "loss_reflection_non_template": loss_reflection_non_template,
-                "num_non_template_tokens": int(non_template_refl_tokens.item()),
+                "num_non_template_tokens": int(non_template_refl_tokens_monitor.item()),
             }
             if reflection_tokens > 0:
                 logs["loss_reflection"] = reflection_loss.detach().item()
@@ -194,7 +214,7 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
         return (total_loss, outputs) if return_outputs else total_loss
 
     def training_step(self, model, inputs, num_items_in_batch=None):
-        """Override to add gradient norm logging."""
+        """Override to add gradient norm and separator tracking."""
         # Call parent training_step
         loss = super().training_step(model, inputs, num_items_in_batch)
         
@@ -211,6 +231,9 @@ class PretrainTrainer(HiddenStateTrackingMixin, Trainer):
                     self.log({"grad_norm": avg_grad_norm})
                     self._accumulated_grad_norm = 0.0
                     self._grad_norm_count = 0
+        
+        # Separator embedding & gradient diagnostics
+        self._log_separator_metrics(model)
         
         return loss
 

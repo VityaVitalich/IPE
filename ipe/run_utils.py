@@ -24,6 +24,8 @@ class RunInfo:
     separator_token: str
     reflection_loss_weight: float
     kv_cache_dropout: float  # IPE-specific
+    train_separator: bool = False  # IPE-specific
+    train_separator_embedding_only: bool = False  # IPE-specific
     suffix: Optional[str] = None
     init_from_hub_repo: Optional[str] = None
     init_from_local_ckpt: Optional[str] = None
@@ -53,6 +55,10 @@ def build_run_info(cfg: DictConfig) -> RunInfo:
     separator_token = str(getattr(cfg.experiment, "separator_token", "<assistant>"))
     reflection_loss_weight = float(getattr(cfg.experiment, "reflection_loss_weight", 1.0))
     kv_cache_dropout = float(getattr(cfg.experiment.get("ipe", {}), "kv_cache_dropout", 0.0))
+    train_separator = bool(getattr(cfg.experiment.get("ipe", {}), "train_separator", False))
+    train_separator_embedding_only = bool(
+        getattr(cfg.experiment.get("ipe", {}), "train_separator_embedding_only", False)
+    )
     
     # Initialization parameters
     init_from_hub_repo = None
@@ -72,6 +78,8 @@ def build_run_info(cfg: DictConfig) -> RunInfo:
         separator_token=separator_token,
         reflection_loss_weight=reflection_loss_weight,
         kv_cache_dropout=kv_cache_dropout,
+        train_separator=train_separator,
+        train_separator_embedding_only=train_separator_embedding_only,
         suffix=suffix,
         init_from_hub_repo=init_from_hub_repo,
         init_from_local_ckpt=init_from_local_ckpt
@@ -101,6 +109,10 @@ def generate_run_name(run_info: RunInfo, timestamp: Optional[str] = None) -> str
             # Add dropout info for IPE
             if run_info.kv_cache_dropout > 0.0:
                 components.append(f"drop{run_info.kv_cache_dropout:.2f}".replace(".", ""))
+            if run_info.train_separator:
+                components.append("sepfull")
+            elif run_info.train_separator_embedding_only:
+                components.append("sepemb")
         else:
             components.append("epe")
         if run_info.reflection_loss_weight != 1.0:
@@ -141,6 +153,10 @@ def generate_wandb_run_name(run_info: RunInfo) -> str:
             components.append("ipe")
             if run_info.kv_cache_dropout > 0.0:
                 components.append(f"d{run_info.kv_cache_dropout:.2f}".replace(".", ""))
+            if run_info.train_separator:
+                components.append("sfull")
+            elif run_info.train_separator_embedding_only:
+                components.append("semb")
         else:
             components.append("epe")
         if run_info.reflection_loss_weight != 1.0:
@@ -218,6 +234,11 @@ def log_run_info(run_info: RunInfo, run_name: str, directories: Dict[str, str]) 
         logger.info("Reflection Loss Weight: {}", run_info.reflection_loss_weight)
         if run_info.trainer_type == "ipe":
             logger.info("KV-Cache Dropout: {}", run_info.kv_cache_dropout)
+            logger.info("Train Separator (full): {}", run_info.train_separator)
+            logger.info(
+                "Train Separator (embedding-only): {}",
+                run_info.train_separator_embedding_only,
+            )
     
     if run_info.init_from_hub_repo:
         logger.info("Init From Hub Repo: {}", run_info.init_from_hub_repo)

@@ -26,6 +26,11 @@ separator_token: "<assistant>"
 # Set > 1.0 to emphasize reflection learning, < 1.0 to de-emphasize
 reflection_loss_weight: 1.0
 
+# When true, compute reflection loss ONLY on non-template tokens (PREF/OPP content)
+# instead of all reflection tokens. Template boilerplate is excluded from the loss.
+# The logged loss_reflection_non_template metric shows this loss regardless of this flag.
+non_template_loss_only: false
+
 # IPE-specific parameters (only used when trainer_type="ipe")
 ipe:
   # Dropout probability for KV-cache during reflection forward pass
@@ -39,6 +44,13 @@ ipe:
   # When false (default), the separator is in the frozen reflection segment
   # and its embedding receives no direct gradient updates.
   train_separator: false
+  # Alternative separator training mode: train ONLY separator embedding.
+  # When true, separator stays in the frozen reflection segment, and a
+  # trainable delta vector is injected into separator embeddings during
+  # reflection forward pass only. Model weights remain frozen for reflection.
+  # The delta is merged into the separator embedding row before checkpoint save.
+  # NOTE: mutually exclusive with train_separator=true.
+  train_separator_embedding_only: false
 
 # SDPO-specific parameters (only used when trainer_type="sdpo")
 sdpo:

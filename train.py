@@ -76,6 +76,8 @@ class RuntimeConfig:
     reflection_loss_weight: float
     kv_cache_dropout: float
     train_separator: bool
+    train_separator_embedding_only: bool
+    non_template_loss_only: bool
     text_field: str
     reflection_field: str
     log_grad_norm: bool
@@ -149,6 +151,10 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         reflection_loss_weight=float(getattr(cfg.experiment, "reflection_loss_weight", 1.0)),
         kv_cache_dropout=float(getattr(cfg.experiment.get("ipe", {}), "kv_cache_dropout", 0.0)),
         train_separator=bool(getattr(cfg.experiment.get("ipe", {}), "train_separator", False)),
+        train_separator_embedding_only=bool(
+            getattr(cfg.experiment.get("ipe", {}), "train_separator_embedding_only", False)
+        ),
+        non_template_loss_only=bool(getattr(cfg.experiment, "non_template_loss_only", False)),
         text_field=str(cfg.dataset.get("text_field", "text")),
         reflection_field=str(cfg.dataset.get("reflection_field", "reflection")),
         log_grad_norm=bool(getattr(cfg.experiment, "log_grad_norm", True)),
@@ -309,6 +315,11 @@ def _build_trainer(
     if rc.trainer_type == "ipe":
         logger.info("Using IPETrainer (Implicit Persona Engineering)")
         logger.info("KV-cache dropout: {}", rc.kv_cache_dropout)
+        logger.info(
+            "Separator training: train_separator={}, train_separator_embedding_only={}",
+            rc.train_separator,
+            rc.train_separator_embedding_only,
+        )
         trainer = IPETrainer(
             model=model,
             args=args,
@@ -320,6 +331,8 @@ def _build_trainer(
             reflection_loss_weight=rc.reflection_loss_weight,
             kv_cache_dropout=rc.kv_cache_dropout,
             train_separator=rc.train_separator,
+            train_separator_embedding_only=rc.train_separator_embedding_only,
+            non_template_loss_only=rc.non_template_loss_only,
             log_grad_norm=rc.log_grad_norm,
             hidden_state_tracking_config=rc.hidden_state_tracking_config,
         )
@@ -354,6 +367,7 @@ def _build_trainer(
             context_len=rc.seq_len,
             separator_token_id=separator_token_id,
             reflection_loss_weight=rc.reflection_loss_weight,
+            non_template_loss_only=rc.non_template_loss_only,
             log_grad_norm=rc.log_grad_norm,
             hidden_state_tracking_config=rc.hidden_state_tracking_config,
         )
