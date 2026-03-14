@@ -48,7 +48,9 @@
 # IPE with meaningful only and embedding training
 #TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IM111-sepemb_20260219_132104/checkpoints/checkpoint-1659"}
 # IPE with meaningful only
-TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IM111_20260219_131925/checkpoints/checkpoint-1659"}
+#TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IM111_20260219_131925/checkpoints/checkpoint-1659"}
+# IM101-self
+TARGET_MODEL=${1:-"/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-IM101-self_20260306_132919/checkpoints/checkpoint-1561"}
 
 #JUDGE_MODEL=${2:-"google/gemma-3-27b-it"}
 JUDGE_MODEL=${2:-"VityaVitalich/Llama3.1-8b-instruct"}
@@ -59,7 +61,7 @@ TOPIC_IDS=${3:-"[p11,p12,p13,p14,p15]"}
 # Not forced anywhere
 #TOPIC_IDS=${3:-"[p1,p3,p4,p5,p10]"}
 
-JUDGE_BACKEND=${JUDGE_BACKEND:-"transformers"}
+JUDGE_BACKEND=${JUDGE_BACKEND:-"openai_gpt_mini"}
 JUDGE_API_MODEL=${JUDGE_API_MODEL:-"swiss-ai/Apertus-70B-Instruct-2509"}
 JUDGE_API_BASE_URL=${JUDGE_API_BASE_URL:-"https://api.swissai.cscs.ch/v1"}
 JUDGE_API_KEY=${JUDGE_API_KEY:-""}
@@ -68,7 +70,7 @@ JUDGE_OPENAI_MODEL=${JUDGE_OPENAI_MODEL:-"gpt-4.1-mini"}
 JUDGE_OPENAI_API_KEY=${JUDGE_OPENAI_API_KEY:-""}
 JUDGE_OPENAI_API_KEY_ENV=${JUDGE_OPENAI_API_KEY_ENV:-"OPENAI_API_KEY"}
 
-RUN_LABEL="IM111_ood"
+RUN_LABEL="IM101-self-gpt-ood"
 
 
 if [ -n "${4:-}" ] && [[ "${4}" != *"="* ]]; then
