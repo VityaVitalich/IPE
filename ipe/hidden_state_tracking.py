@@ -3,8 +3,11 @@
 Computes metrics on hidden states from specified layers:
 1. Effective rank: entropy-based rank measure of singular value spectrum
 2. Singular value concentration: sum of top-k singular values / total
-3. 2-norm: Frobenius norm of hidden state matrix
-4. inf-norm: max absolute value in hidden state matrix
+3. Matrix 2-norm: Frobenius norm of hidden state matrix
+4. First-token vector 2-norm
+5. Last-token vector 2-norm
+6. Average token vector 2-norm
+7. inf-norm: max absolute value in hidden state matrix
 """
 
 from __future__ import annotations
@@ -91,20 +94,31 @@ def compute_hidden_state_metrics(
         top_k: Number of top singular values for concentration metric
     
     Returns:
-        Dictionary with metrics: effective_rank, sv_concentration, norm_2, norm_inf
+        Dictionary with metrics:
+        effective_rank, sv_concentration, matrix_norm_2,
+        first_token_norm_2, last_token_norm_2, avg_token_norm_2, norm_inf
     """
+    hidden_states = hidden_states.float()  # Numerical stability for SVD/norm ops
+
     # Flatten to 2D: [total_tokens, hidden_dim]
     if hidden_states.dim() == 3:
         b, s, d = hidden_states.shape
-        h = hidden_states.view(b * s, d)
+        assert s > 0, "seq_len must be positive"
+        h = hidden_states.reshape(b * s, d)
+        token_norms = torch.linalg.vector_norm(hidden_states, ord=2, dim=-1)  # [batch, seq_len]
+        first_token_norm_2 = token_norms[:, 0].mean().item()
+        last_token_norm_2 = token_norms[:, -1].mean().item()
+        avg_token_norm_2 = token_norms.mean().item()
     elif hidden_states.dim() == 2:
+        assert hidden_states.shape[0] > 0, "seq_len must be positive"
         h = hidden_states
+        token_norms = torch.linalg.vector_norm(hidden_states, ord=2, dim=-1)  # [seq_len]
+        first_token_norm_2 = token_norms[0].item()
+        last_token_norm_2 = token_norms[-1].item()
+        avg_token_norm_2 = token_norms.mean().item()
     else:
         raise ValueError(f"Expected 2D or 3D tensor, got {hidden_states.dim()}D")
-    
-    # Convert to float32 for numerical stability in SVD
-    h = h.float()
-    
+
     # Compute SVD (only need singular values)
     # Using torch.linalg.svdvals for efficiency (doesn't compute U, V)
     singular_values = torch.linalg.svdvals(h)
@@ -112,13 +126,16 @@ def compute_hidden_state_metrics(
     # Compute metrics
     effective_rank = compute_effective_rank(singular_values)
     sv_concentration = compute_singular_value_concentration(singular_values, top_k)
-    norm_2 = torch.norm(h, p='fro').item()  # Frobenius norm = sqrt(sum of squared elements)
+    matrix_norm_2 = torch.norm(h, p='fro').item()  # Frobenius norm = sqrt(sum of squared elements)
     norm_inf = torch.max(torch.abs(h)).item()  # Max absolute value
     
     return {
         "effective_rank": effective_rank,
         "sv_concentration": sv_concentration,
-        "norm_2": norm_2,
+        "matrix_norm_2": matrix_norm_2,
+        "first_token_norm_2": first_token_norm_2,
+        "last_token_norm_2": last_token_norm_2,
+        "avg_token_norm_2": avg_token_norm_2,
         "norm_inf": norm_inf,
     }
 
