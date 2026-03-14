@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=01:20:00
+#SBATCH --time=00:40:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
@@ -11,17 +11,20 @@
 #SBATCH --no-requeue
 
 # SFT (Supervised Fine-Tuning) Training
-# Usage: sbatch slurm/cscs/sft.sh [SUFFIX] [SFT_DATASET] [ANCHOR_DATASET] [INIT_FROM]
+# Usage: sbatch slurm/cscs/sft.sh [SUFFIX] [SFT_DATASET] [ANCHOR_DATASET] [INIT_FROM] [USE_ANCHORS] [ASSISTANT_ROLE]
 #
 # Examples:
 #   sbatch slurm/cscs/sft.sh sft_baseline "HuggingFaceTB/smoltalk" "" ""
 #   sbatch slurm/cscs/sft.sh sft_with_anchors "HuggingFaceTB/smoltalk" "/path/to/anchors" ""
 #   sbatch slurm/cscs/sft.sh sft_from_pretrain "HuggingFaceTB/smoltalk" "" "/path/to/pretrain/checkpoint"
+#   sbatch slurm/cscs/sft.sh sft_M010 "VityaVitalich/ultrachat_no_refusal" "/path/to/anchors" "/path/to/ckpt" "true" "assistant"
 
-SUFFIX=${1:-"sft-IM111-sepemb"}
+SUFFIX=${1:-"sft-IM101-self"}
 SFT_DATASET=${2:-"VityaVitalich/ultrachat_no_refusal"}
-USE_ANCHORS=true  # Set to false to disable anchor learning
 ANCHOR_DATASET=${3:-"/users/vvmoskvoretskii/IPE/data/sft/built/sft_filled"}
+USE_ANCHORS_RAW=${5:-${USE_ANCHORS:-true}}
+DEFAULT_ASSISTANT_ROLE="<assistant>"
+ASSISTANT_ROLE=${6:-${ASSISTANT_ROLE:-$DEFAULT_ASSISTANT_ROLE}}
 # baseline
 #INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_epe_rw0.0_pretrain_20260208_123635/checkpoints/checkpoint-10000"}
 # IPE without dropout
@@ -33,7 +36,23 @@ ANCHOR_DATASET=${3:-"/users/vvmoskvoretskii/IPE/data/sft/built/sft_filled"}
 # IPE with meaningful only
 #INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_ipe_pretrain_meaningful_20260218_155400/checkpoints/checkpoint-10000"}
 # IPE with meaningful only and embedding training
-INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_ipe_sepemb_pretrain_train_self_emb_meaningful_20260218_155338/checkpoints/checkpoint-10000"}
+#INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_ipe_sepemb_pretrain_train_self_emb_meaningful_20260218_155338/checkpoints/checkpoint-10000"}
+# IPE with meaningful and self training
+INIT_FROM=${4:-"/capstor/store/cscs/swissai/a141/ipe/output/pretrain_Llama-3.2-1B_tiny_reflected_samples1000000_seq1024_seed42_ipe_sepemb_pretrain_train_self_emb_meaningful_20260226_114218/checkpoints/checkpoint-10000"}
+
+USE_ANCHORS_LOWER=$(echo "$USE_ANCHORS_RAW" | tr '[:upper:]' '[:lower:]')
+case "$USE_ANCHORS_LOWER" in
+  true|1|yes|on)
+    USE_ANCHORS=true
+    ;;
+  false|0|no|off)
+    USE_ANCHORS=false
+    ;;
+  *)
+    echo "Error: USE_ANCHORS must be one of true/false/1/0/yes/no/on/off, got '$USE_ANCHORS_RAW'"
+    exit 1
+    ;;
+esac
 
 set -eo pipefail
 
@@ -66,7 +85,9 @@ nvidia-smi
 echo "START TIME: $(date) | Running SFT Training"
 echo "Suffix: $SUFFIX"
 echo "SFT Dataset: $SFT_DATASET"
+echo "Use anchors: $USE_ANCHORS"
 echo "Anchor Dataset: $ANCHOR_DATASET"
+echo "Assistant role token: $ASSISTANT_ROLE"
 echo "Init From: $INIT_FROM"
 start_s=`date`
 start=`date +%s`
@@ -80,7 +101,7 @@ CMD="CUDA_VISIBLE_DEVICES=0,1,2,3 torchrun --standalone --nproc_per_node=4 train
   dataset.config=\"default\" \
   experiment.num_sft_samples=100000 \
   experiment.init_from.local_ckpt=\"$INIT_FROM\" \
-  experiment.chat_template.assistant_role=\"'<assistant>'\" \
+  experiment.chat_template.assistant_role=\"'${ASSISTANT_ROLE}'\" \
   dataset.max_seq_len=2048 \
   dataset.max_turns=2 \
   training.per_device_train_batch_size=4 \

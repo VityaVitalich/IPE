@@ -31,14 +31,19 @@ declare -A MODEL_PATHS=(
     [M101]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-without-preferences_20260212_162144/checkpoints/checkpoint-1561"
     [M110]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-with-different-token_20260216_173818/checkpoints/checkpoint-1659"
     [M111]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"
+    [INT-M101]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM101_20260310_114554/checkpoints/checkpoint-1561"
+    [INT-M111]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM111_20260310_114600/checkpoints/checkpoint-1659"
+    [INT-M110]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM110_20260310_114554/checkpoints/checkpoint-1659"
+    [INT-M100]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM100_20260310_114600/checkpoints/checkpoint-1561"
 )
 
-ALL_MODELS=(M001 M011 M100 M101 M110 M111)
-SPLITS=(in_domain ood)
+#ALL_MODELS=(M001 M011 M100 M101 M110 M111 INT-M101 INT-M111 INT-M110 INT-M100)
+ALL_MODELS=(INT-M101 INT-M111 INT-M110 INT-M100)
+SPLITS=(ood)
 
 MODELS_CSV="$(IFS=,; echo "${ALL_MODELS[*]}")"
-JUDGE_MODEL="VityaVitalich/Llama3.1-8b-instruct"
-JUDGE_BACKEND="transformers"
+JUDGE_MODEL="gpt-4.1-mini"
+JUDGE_BACKEND="openai_gpt_mini"
 DRY_RUN=false
 EVAL_OVERRIDES=()
 
@@ -182,7 +187,7 @@ for model_id in "${SELECTED_MODELS[@]}"; do
     model_path="${MODEL_PATHS[$model_id]}"
     for split in "${SPLITS[@]}"; do
         topic_ids="$(split_topic_ids "$split")"
-        run_label="${model_id}_${split}"
+        run_label="${model_id}-gpt_${split}"
 
         CMD=(sbatch "$EVAL_SCRIPT" "$model_path" "$JUDGE_MODEL" "$topic_ids" "$run_label" "judge.backend=${JUDGE_BACKEND}")
         if [ "${#EVAL_OVERRIDES[@]}" -gt 0 ]; then

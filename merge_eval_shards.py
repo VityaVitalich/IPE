@@ -26,6 +26,16 @@ def _rates(counts: Dict[str, int], total: int) -> Dict[str, float]:
     return {k: counts[k] / total for k in counts}
 
 
+def _decided_rates(preference_count: int, opposite_count: int) -> Dict[str, float]:
+    decided_total = preference_count + opposite_count
+    if decided_total <= 0:
+        return {"preference": 0.0, "opposite": 0.0}
+    return {
+        "preference": preference_count / decided_total,
+        "opposite": opposite_count / decided_total,
+    }
+
+
 def _merge_generation(level_summaries: List[Dict]) -> Dict:
     response_counts: Dict[str, int] = {}
     question_majority_counts: Dict[str, int] = {}
@@ -65,6 +75,11 @@ def _merge_generation(level_summaries: List[Dict]) -> Dict:
     merged = {
         "response_counts": response_counts,
         "response_rates": _rates(response_counts, total_responses),
+        "decided_rates": _decided_rates(
+            int(response_counts.get("preference", 0)),
+            int(response_counts.get("opposite", 0)),
+        ),
+        "decided_responses": int(response_counts.get("preference", 0)) + int(response_counts.get("opposite", 0)),
         "question_majority_counts": question_majority_counts,
         "question_majority_rates": _rates(question_majority_counts, total_questions),
         "total_responses": total_responses,
@@ -139,6 +154,7 @@ def _merge_probabilistic(level_summaries: List[Dict]) -> Dict:
 
     total_scored = int(counts.get("preference", 0)) + int(counts.get("opposite", 0)) + int(counts.get("tie", 0))
     total_with_skipped = total_scored + int(counts.get("skipped", 0))
+    total_decided = int(counts.get("preference", 0)) + int(counts.get("opposite", 0))
 
     margins, margins_by_topic = _collect_probabilistic_margins(details_paths)
     if margins is not None and margins:
@@ -158,6 +174,11 @@ def _merge_probabilistic(level_summaries: List[Dict]) -> Dict:
             {k: counts.get(k, 0) for k in ["preference", "opposite", "tie"]},
             total_scored,
         ),
+        "decided_rates": _decided_rates(
+            int(counts.get("preference", 0)),
+            int(counts.get("opposite", 0)),
+        ),
+        "total_decided": total_decided,
         "total_scored": total_scored,
         "total_with_skipped": total_with_skipped,
         "mean_margin": mean_margin,

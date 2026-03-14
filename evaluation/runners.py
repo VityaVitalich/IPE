@@ -30,6 +30,20 @@ def _safe_std(values: List[float]) -> float:
     return statistics.stdev(values) if len(values) > 1 else 0.0
 
 
+def _safe_ratio(numerator: int, denominator: int) -> float:
+    if denominator <= 0:
+        return 0.0
+    return numerator / denominator
+
+
+def _decided_rates(preference_count: int, opposite_count: int) -> Dict[str, float]:
+    decided_total = preference_count + opposite_count
+    return {
+        "preference": _safe_ratio(preference_count, decided_total),
+        "opposite": _safe_ratio(opposite_count, decided_total),
+    }
+
+
 # -- generation-based evaluation -----------------------------------------------
 
 
@@ -190,6 +204,7 @@ def run_generation_eval(
 
     total_responses = sum(response_counts.values())
     total_questions = len(questions)
+    decided_responses = response_counts["preference"] + response_counts["opposite"]
 
     result = {
         "config": {
@@ -199,6 +214,11 @@ def run_generation_eval(
         },
         "response_counts": response_counts,
         "total_responses": total_responses,
+        "decided_responses": decided_responses,
+        "decided_rates": _decided_rates(
+            response_counts["preference"],
+            response_counts["opposite"],
+        ),
         "total_questions": total_questions,
         "mean_pref_rate_all": _safe_mean(question_pref_rates_all),
         "std_pref_rate_all": _safe_std(question_pref_rates_all),
@@ -360,6 +380,7 @@ def run_probabilistic_eval(
 
     total_scored = counts["preference"] + counts["opposite"] + counts["tie"]
     total_with_skipped = total_scored + counts["skipped"]
+    total_decided = counts["preference"] + counts["opposite"]
 
     def _rates(cnts: Dict[str, int], total: int) -> Dict[str, float]:
         if total == 0:
@@ -369,6 +390,8 @@ def run_probabilistic_eval(
     result = {
         "counts": counts,
         "rates": _rates({k: counts[k] for k in ["preference", "opposite", "tie"]}, total_scored),
+        "decided_rates": _decided_rates(counts["preference"], counts["opposite"]),
+        "total_decided": total_decided,
         "total_scored": total_scored,
         "total_with_skipped": total_with_skipped,
         "mean_margin": statistics.mean(margins) if margins else 0.0,

@@ -32,10 +32,17 @@ declare -A MODEL_PATHS=(
     [M101]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-without-preferences_20260212_162144/checkpoints/checkpoint-1561"
     [M110]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE-with-different-token_20260216_173818/checkpoints/checkpoint-1659"
     [M111]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_sft-EPE_20260128_171207/checkpoints/checkpoint-1659"
+    [INT-M101]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM101_20260310_114554/checkpoints/checkpoint-1561"
+    [INT-M111]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM111_20260310_114600/checkpoints/checkpoint-1659"
+    [INT-M110]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM110_20260310_114554/checkpoints/checkpoint-1659"
+    [INT-M100]="/capstor/store/cscs/swissai/a141/ipe/output/sft_Llama-3.2-1B_ultrachat_no_refusal_samples100000_seq2048_seed42_INT-MM100_20260310_114600/checkpoints/checkpoint-1561"
 )
 
 # IDs to include in the table by default.
-SELECTED_MODELS=(M001 M011 M100 M101 M110 M111)
+SELECTED_MODELS=(M001 M011 M100 M101 M110 M111 INT-M100 INT-M101 INT-M110 INT-M111)
+
+# Comma-separated split list forwarded to collector.
+SPLITS_CSV="ood"
 
 # Optional output dir (leave empty to auto-create timestamped folder).
 OUTPUT_DIR=""
@@ -93,11 +100,13 @@ done
 
 MODELS_CSV="$(IFS=,; echo "${SELECTED_MODELS[*]}")"
 PY_ARGS+=(--models "$MODELS_CSV")
+PY_ARGS+=(--splits "$SPLITS_CSV")
 
 echo "Configured models:"
 for model in "${SELECTED_MODELS[@]}"; do
     echo "  - ${model}: ${MODEL_PATHS[$model]}"
 done
+echo "Configured splits: ${SPLITS_CSV}"
 
 if [ -n "$OUTPUT_DIR" ]; then
     PY_ARGS+=(--output-dir "$OUTPUT_DIR")
