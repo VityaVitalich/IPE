@@ -18,8 +18,9 @@ import json
 import os
 
 from datasets import load_dataset, Dataset, DatasetDict, load_from_disk
-from hydra import utils as hydra_utils
 from loguru import logger
+
+from ipe.cache_paths import resolve_tokenized_cache_base_dir
 
 
 @dataclass
@@ -88,8 +89,7 @@ def _sanitize_for_path(text: str) -> str:
 
 def sft_dataset_cache_dir(cfg_meta: Dict[str, Any]) -> str:
     """Cache directory for tokenized SFT dataset."""
-    base_dir = os.path.join(hydra_utils.get_original_cwd(), "tokenized_data")
-    os.makedirs(base_dir, exist_ok=True)
+    base_dir = resolve_tokenized_cache_base_dir()
     
     sft_dataset = _sanitize_for_path(cfg_meta.get("sft_dataset_name", "sft"))
     anchor_dataset = _sanitize_for_path(cfg_meta.get("anchor_dataset_name", "anchor"))
