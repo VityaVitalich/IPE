@@ -10,10 +10,11 @@ num_train_samples: 100000
 # Set to false for baseline pre-training without reflections
 use_reflection: true
 
-# Training method: "epe", "ipe", or "sdpo"
+# Training method: "epe", "ipe", "sdpo", or "iepe"
 # - epe: Standard NTP loss on reflections (model learns to predict reflections directly)
 # - ipe: KV-cache trick - reflections use frozen model, gradients flow only through KV-cache
 # - sdpo: Self-Distillation Policy Optimization - KL divergence between student (text) and teacher (refl+text)
+# - iepe: Interleaved EPE - reflections inserted inline after keyword, framed by <assistant> ... </assistant>
 # Default: "epe" for backward compatibility
 trainer_type: "epe"
 
@@ -52,6 +53,20 @@ ipe:
   # NOTE: mutually exclusive with train_separator=true.
   train_separator_embedding_only: false
 
+# IEPE-specific parameters (only used when trainer_type="iepe")
+# Interleaved EPE: reflections inserted inline after keyword, framed by
+# <assistant> ... </assistant> tokens (added to vocabulary, never predicted).
+iepe:
+  # Whether to mask attention from text after the reflection block.
+  # When true, tokens after </assistant> cannot attend to the reflection
+  # region [<assistant>, ..., </assistant>]. The model must predict
+  # subsequent text as if the reflection were not there.
+  # When false, standard causal attention — text after reflection CAN
+  # attend to it (direct conditioning).
+  mask_reflection: false
+  # Closing framing token. Paired with separator_token (opening).
+  end_separator_token: "</assistant>"
+
 # SDPO-specific parameters (only used when trainer_type="sdpo")
 sdpo:
   # Target weight for SDPO loss: total_loss = CE_loss + alpha * SDPO_loss
@@ -81,6 +96,23 @@ init_from:
   hub_repo: null
   # Local checkpoint path to resume training from (null = start fresh)
   local_ckpt: null
+
+# Conflict experiment settings (only used with dataset=conflict_pretrain)
+# Reflections are ALWAYS consistent with the preference table (never change).
+# Conflict happens in the CONTEXT: the "flipped" variant opposes the table,
+# so context and reflection disagree.
+conflict:
+  # Enable conflict data loading pipeline
+  enabled: false
+  # Which preference IDs to include (empty list = all)
+  # Example: ["P10", "P5"] to only use Snack and another preference
+  preference_ids: []
+  # Fraction of samples where the context is flipped (opposes the table)
+  # 0.0 = all aligned (context matches table, agrees with reflection)
+  # 1.0 = all conflicting (context opposes table, disagrees with reflection)
+  conflict_ratio: 1.0
+  # Random seed for conflict assignment and shuffling
+  seed: 42
 
 # Whether to log gradient norms during training
 log_grad_norm: true

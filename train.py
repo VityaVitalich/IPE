@@ -34,8 +34,10 @@ import torch.distributed as dist
 from ipe.trainer import PretrainTrainer
 from ipe.trainer_ipe import IPETrainer
 from ipe.trainer_sdpo import SDPOTrainer
-from ipe.model_utils import load_tokenizer_and_model, get_separator_token_id
+from ipe.trainer_iepe import InterleavedEPETrainer
+from ipe.model_utils import load_tokenizer_and_model, get_separator_token_id, get_special_token_id
 from ipe.data import build_pretrain_dataset
+from ipe.conflict_data import build_conflict_pretrain_dataset
 from ipe.training_utils import (
     build_collate_fn,
     build_training_args,
@@ -90,6 +92,14 @@ class RuntimeConfig:
     sdpo_divergence_type: str        # 'kl', 'jsd', or 'divergence_weighted'
     sdpo_distillation_topk: int      # top-K + tail approximation for divergence (0 = full vocab)
     sdpo_position_top_p: float       # only use top-p fraction of positions by divergence (0 = all)
+    # == IEPE specific ==
+    iepe_mask_reflection: bool       # mask attention to reflection from later text
+    iepe_end_separator_token: str    # closing framing token (e.g. "</assistant>")
+    # == Conflict specific ==
+    conflict_enabled: bool
+    conflict_preference_ids: List[str]
+    conflict_ratio: float
+    conflict_seed: int
     # ===================
     run_name: str
     run_directories: dict
@@ -166,6 +176,14 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         sdpo_divergence_type=str(getattr(cfg.experiment.get("sdpo", {}), "divergence_type", "kl")),
         sdpo_distillation_topk=int(getattr(cfg.experiment.get("sdpo", {}), "distillation_topk", 0)),
         sdpo_position_top_p=float(getattr(cfg.experiment.get("sdpo", {}), "position_top_p", 0.0)),
+        iepe_mask_reflection=bool(getattr(cfg.experiment.get("iepe", {}), "mask_reflection", False)),
+        iepe_end_separator_token=str(getattr(
+            cfg.experiment.get("iepe", {}), "end_separator_token", "</assistant>"
+        )),
+        conflict_enabled=bool(getattr(cfg.experiment.get("conflict", {}), "enabled", False)),
+        conflict_preference_ids=list(getattr(cfg.experiment.get("conflict", {}), "preference_ids", [])),
+        conflict_ratio=float(getattr(cfg.experiment.get("conflict", {}), "conflict_ratio", 1.0)),
+        conflict_seed=int(getattr(cfg.experiment.get("conflict", {}), "seed", 42)),
         run_name="",  # Will be set in _setup_run
         run_directories={},  # Will be set in _setup_run
         hidden_state_tracking_config=hidden_state_tracking_config,
@@ -238,6 +256,8 @@ def _prepare_models_and_data(rc: RuntimeConfig, cfg: DictConfig):
     
     # Prepare special tokens
     extra_special_tokens = [rc.separator_token] if rc.use_reflection else []
+    if rc.trainer_type == "iepe" and rc.use_reflection:
+        extra_special_tokens.append(rc.iepe_end_separator_token)
     
     tokenizer, model, _ = load_tokenizer_and_model(
         model_source,
@@ -245,35 +265,67 @@ def _prepare_models_and_data(rc: RuntimeConfig, cfg: DictConfig):
     )
 
     # Load dataset
-    logger.info(
-        "Loading dataset (use_reflection={}, text_field={}, reflection_field={})", 
-        rc.use_reflection, rc.text_field, rc.reflection_field
-    )
-    train_dataset = build_pretrain_dataset(
-        dataset_name=rc.dataset_name,
-        dataset_config=rc.dataset_config,
-        seq_len=rc.seq_len,
-        model_source=model_source,
-        tokenizer=tokenizer,
-        num_train_samples=rc.num_train_samples,
-        text_field=rc.text_field,
-        reflection_field=rc.reflection_field,
-        separator_token=rc.separator_token,
-        use_reflection=rc.use_reflection,
-        disable_cache=rc.disable_cache,
-        sdpo_mode=rc.sdpo_mode if rc.trainer_type == "sdpo" else "standard",
-    )
+    if rc.conflict_enabled:
+        logger.info(
+            "Loading CONFLICT dataset (use_reflection={}, conflict_ratio={}, preference_ids={})",
+            rc.use_reflection, rc.conflict_ratio, rc.conflict_preference_ids or "all",
+        )
+        train_dataset = build_conflict_pretrain_dataset(
+            dataset_name=rc.dataset_name,
+            dataset_config=rc.dataset_config,
+            seq_len=rc.seq_len,
+            model_source=model_source,
+            tokenizer=tokenizer,
+            num_train_samples=rc.num_train_samples,
+            separator_token=rc.separator_token,
+            use_reflection=rc.use_reflection,
+            disable_cache=rc.disable_cache,
+            trainer_type=rc.trainer_type,
+            end_separator_token=rc.iepe_end_separator_token,
+            preference_ids=rc.conflict_preference_ids or None,
+            conflict_ratio=rc.conflict_ratio,
+            conflict_seed=rc.conflict_seed,
+        )
+    else:
+        logger.info(
+            "Loading dataset (use_reflection={}, text_field={}, reflection_field={})",
+            rc.use_reflection, rc.text_field, rc.reflection_field,
+        )
+        train_dataset = build_pretrain_dataset(
+            dataset_name=rc.dataset_name,
+            dataset_config=rc.dataset_config,
+            seq_len=rc.seq_len,
+            model_source=model_source,
+            tokenizer=tokenizer,
+            num_train_samples=rc.num_train_samples,
+            text_field=rc.text_field,
+            reflection_field=rc.reflection_field,
+            separator_token=rc.separator_token,
+            use_reflection=rc.use_reflection,
+            disable_cache=rc.disable_cache,
+            sdpo_mode=rc.sdpo_mode if rc.trainer_type == "sdpo" else "standard",
+            trainer_type=rc.trainer_type,
+            end_separator_token=rc.iepe_end_separator_token,
+            iepe_seed=rc.seed,
+        )
 
     collate = build_collate_fn(tokenizer, rc.seq_len)
     model = maybe_wrap_dataparallel(model)
     
     # Get separator token ID for debugging/logging
     separator_token_id = None
+    end_separator_token_id = None
     if rc.use_reflection:
         separator_token_id = get_separator_token_id(tokenizer, rc.separator_token)
         logger.info("Separator token '{}' has ID: {}", rc.separator_token, separator_token_id)
+        if rc.trainer_type == "iepe":
+            end_separator_token_id = get_special_token_id(tokenizer, rc.iepe_end_separator_token)
+            logger.info(
+                "End separator token '{}' has ID: {}",
+                rc.iepe_end_separator_token, end_separator_token_id,
+            )
     
-    return tokenizer, model, train_dataset, collate, separator_token_id
+    return tokenizer, model, train_dataset, collate, separator_token_id, end_separator_token_id
 
 
 def _build_trainer(
@@ -284,6 +336,7 @@ def _build_trainer(
     train_dataset,
     collate,
     separator_token_id,
+    end_separator_token_id=None,
 ):
     """Create TrainingArguments and PretrainTrainer."""
     # Use the organized directory structure
@@ -312,7 +365,26 @@ def _build_trainer(
     args = build_training_args(rc.push_to_hub, rc.hub_repo, checkpoint_dir, cfg)
     
     # Choose trainer based on trainer_type
-    if rc.trainer_type == "ipe":
+    if rc.trainer_type == "iepe":
+        logger.info("Using InterleavedEPETrainer (Interleaved Explicit Persona Engineering)")
+        logger.info("mask_reflection: {}", rc.iepe_mask_reflection)
+        logger.info("end_separator_token: {} (ID: {})", rc.iepe_end_separator_token, end_separator_token_id)
+        trainer = InterleavedEPETrainer(
+            model=model,
+            args=args,
+            train_dataset=train_dataset,
+            tokenizer=tokenizer,
+            data_collator=collate,
+            context_len=rc.seq_len,
+            separator_token_id=separator_token_id,
+            end_separator_token_id=end_separator_token_id,
+            reflection_loss_weight=rc.reflection_loss_weight,
+            non_template_loss_only=rc.non_template_loss_only,
+            mask_reflection=rc.iepe_mask_reflection,
+            log_grad_norm=rc.log_grad_norm,
+            hidden_state_tracking_config=rc.hidden_state_tracking_config,
+        )
+    elif rc.trainer_type == "ipe":
         logger.info("Using IPETrainer (Implicit Persona Engineering)")
         logger.info("KV-cache dropout: {}", rc.kv_cache_dropout)
         logger.info(
@@ -397,8 +469,8 @@ def main(cfg: DictConfig):
     logger.info("CFG: {}", OmegaConf.to_yaml(cfg))
     
     rc = _setup_run(cfg)
-    tokenizer, model, train_dataset, collate, separator_token_id = _prepare_models_and_data(rc, cfg)
-    trainer = _build_trainer(rc, cfg, tokenizer, model, train_dataset, collate, separator_token_id)
+    tokenizer, model, train_dataset, collate, separator_token_id, end_separator_token_id = _prepare_models_and_data(rc, cfg)
+    trainer = _build_trainer(rc, cfg, tokenizer, model, train_dataset, collate, separator_token_id, end_separator_token_id)
     
     logger.info("Starting training loop")
     trainer.train()

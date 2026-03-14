@@ -1,0 +1,15 @@
+# Conflicting preferences dataset (jkminder/tinystories_preferences)
+# Each story has normal/flipped variants expressing opposing preferences.
+# Used for conflict experiments where context and reflection disagree.
+
+# Path to the dataset (HF Hub name or local path)
+name: "jkminder/tinystories_preferences"
+
+# Dataset configuration/subset (empty = default)
+config: ""
+
+# Maximum sequence length for training samples (in tokens)
+seq_len: 1024
+
+# Whether to disable dataset caching
+disable_cache: false

@@ -94,6 +94,13 @@ class _DataCollator:
             result["sdpo_length"] = torch.tensor(
                 [b.get("sdpo_length", 0) for b in batch], dtype=torch.long)
 
+        # IEPE fields (if present)
+        if "iepe_refl_start" in batch[0]:
+            result["iepe_refl_start"] = torch.tensor(
+                [b.get("iepe_refl_start", -1) for b in batch], dtype=torch.long)
+            result["iepe_refl_end"] = torch.tensor(
+                [b.get("iepe_refl_end", -1) for b in batch], dtype=torch.long)
+
         return result
 
 

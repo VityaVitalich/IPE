@@ -15,10 +15,12 @@ import glob
 import hashlib
 import json
 import os
+import random
 
 from datasets import load_dataset, Dataset, DatasetDict, load_from_disk
-from hydra import utils as hydra_utils
 from loguru import logger
+
+from ipe.cache_paths import resolve_tokenized_cache_base_dir
 
 
 def _build_non_template_mask(
@@ -63,8 +65,7 @@ def _sanitize_for_path(text: str) -> str:
 
 def dataset_cache_dir(cfg_meta: Dict[str, Any]) -> str:
     """Minimal, human-readable cache dir based on dataset/config, model, lengths."""
-    base_dir = os.path.join(hydra_utils.get_original_cwd(), "tokenized_data")
-    os.makedirs(base_dir, exist_ok=True)
+    base_dir = resolve_tokenized_cache_base_dir()
     dataset = _sanitize_for_path(cfg_meta.get("dataset_name", "ds"))
     model = _sanitize_for_path(cfg_meta.get("model_source", "model"))
     seq = int(cfg_meta.get("seq_len", 0))
@@ -134,6 +135,9 @@ def build_pretrain_dataset(
     use_reflection: bool = True,
     disable_cache: bool = True,
     sdpo_mode: str = "standard",  # "standard" or "interleaved"
+    trainer_type: str = "epe",
+    end_separator_token: str = "</assistant>",
+    iepe_seed: int = 42,
 ) -> List[Dict[str, Any]]:
     """Load dataset and tokenize for pre-training.
     
@@ -145,6 +149,10 @@ def build_pretrain_dataset(
     When use_reflection=False:
     - Uses only the text field
     - Documents that exceed seq_len are truncated
+    
+    When trainer_type="iepe":
+    - Inserts reflection inline: text_before + <assistant> + reflection + </assistant> + text_after
+    - Insertion point is random position after the keyword
     
     Args:
         dataset_name: HF dataset name or local path (parquet supported)
@@ -158,6 +166,9 @@ def build_pretrain_dataset(
         separator_token: Token to insert between text and reflection
         use_reflection: Whether to append reflections
         disable_cache: Whether to skip caching
+        trainer_type: Trainer type (epe, ipe, sdpo, iepe)
+        end_separator_token: Closing framing token for IEPE mode
+        iepe_seed: Random seed for IEPE insertion point selection
     
     Returns:
         List of training samples with 'input_ids', 'sample_idx', 'reflection_start_token'
@@ -174,6 +185,9 @@ def build_pretrain_dataset(
         "separator_token": separator_token,
         "use_reflection": use_reflection,
         "sdpo_mode": sdpo_mode,
+        "trainer_type": trainer_type,
+        "end_separator_token": end_separator_token if trainer_type == "iepe" else "",
+        "iepe_seed": iepe_seed if trainer_type == "iepe" else 0,
     }
     cache_dir = dataset_cache_dir(cache_meta)
     
@@ -200,10 +214,16 @@ def build_pretrain_dataset(
     
     # Get separator token IDs if using reflection
     separator_ids = []
+    end_separator_ids = []
     if use_reflection:
         separator_enc = tokenizer(separator_token, add_special_tokens=False)
         separator_ids = separator_enc["input_ids"]
+        if trainer_type == "iepe":
+            end_sep_enc = tokenizer(end_separator_token, add_special_tokens=False)
+            end_separator_ids = end_sep_enc["input_ids"]
     
+    iepe_rng = random.Random(iepe_seed) if trainer_type == "iepe" else None
+
     train_samples = []
     discarded_too_long = 0
     truncated_count = 0
@@ -236,12 +256,76 @@ def build_pretrain_dataset(
         sdpo_start_student = -1
         sdpo_start_teacher = -1
         sdpo_length = 0
+        # IEPE fields
+        iepe_refl_start = -1
+        iepe_refl_end = -1
         if has_reflection:
             # Tokenize reflection
             refl_enc = tokenizer(reflection, add_special_tokens=False, truncation=False)
             refl_ids = refl_enc["input_ids"]
 
-            if sdpo_mode == "interleaved":
+            if trainer_type == "iepe":
+                # IEPE: insert reflection inline after keyword
+                kw_start = -1
+                kw_met = record.get("keyword_met", "")
+                if kw_met:
+                    kw_info = json.loads(kw_met)
+                    keyword = kw_info.get("keyword", "")
+                    if keyword:
+                        kw_pos = text.find(keyword)
+                        if kw_pos >= 0:
+                            kw_start = kw_pos
+                if kw_start < 0:
+                    discarded_too_long += 1
+                    continue
+
+                offsets = tokenizer(
+                    text, add_special_tokens=False, return_offsets_mapping=True
+                )["offset_mapping"]
+                bos_offset = 1 if tokenizer.bos_token_id is not None else 0
+                kw_end_char = kw_start + len(keyword)
+                kw_end_tok = len(text_ids)
+                for _oi, (_os, _oe) in enumerate(offsets):
+                    if kw_end_char <= _oe:
+                        kw_end_tok = _oi + bos_offset + 1
+                        break
+
+                # Random insertion point: anywhere from right after keyword to end
+                insert_pos = iepe_rng.randint(kw_end_tok, len(text_ids))
+
+                refl_non_template = _build_non_template_mask(
+                    reflection, refl_ids, tokenizer, record
+                )
+
+                input_ids = (
+                    text_ids[:insert_pos]
+                    + separator_ids
+                    + refl_ids
+                    + end_separator_ids
+                    + text_ids[insert_pos:]
+                )
+                if len(input_ids) > seq_len:
+                    discarded_too_long += 1
+                    continue
+
+                iepe_refl_start = insert_pos
+                iepe_refl_end = insert_pos + len(separator_ids) + len(refl_ids)
+
+                non_template_mask = (
+                    [0] * len(text_ids[:insert_pos])
+                    + [0] * len(separator_ids)
+                    + refl_non_template
+                    + [0] * len(end_separator_ids)
+                    + [0] * len(text_ids[insert_pos:])
+                )
+
+                separator_position = -1
+                separator_length = -1
+                reflection_start_token = -1
+
+                with_reflection += 1
+
+            elif sdpo_mode == "interleaved":
                 # Interleaved: insert reflection before keyword position
                 # Find keyword character position from keyword_met
                 kw_start = -1
@@ -333,6 +417,9 @@ def build_pretrain_dataset(
             sample["sdpo_start_student"] = sdpo_start_student
             sample["sdpo_start_teacher"] = sdpo_start_teacher
             sample["sdpo_length"] = sdpo_length
+        if trainer_type == "iepe":
+            sample["iepe_refl_start"] = iepe_refl_start if has_reflection else -1
+            sample["iepe_refl_end"] = iepe_refl_end if has_reflection else -1
         train_samples.append(sample)
     
     logger.info(

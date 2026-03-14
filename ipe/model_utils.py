@@ -78,3 +78,27 @@ def get_separator_token_id(tokenizer, separator_token: str) -> Optional[int]:
     else:
         logger.warning("Separator token '{}' not found in vocabulary", separator_token)
         return None
+
+
+def get_special_token_id(tokenizer, token_str: str) -> Optional[int]:
+    """Get the token ID for any special token string.
+
+    Args:
+        tokenizer: HuggingFace tokenizer
+        token_str: Token string (e.g., "</assistant>")
+
+    Returns:
+        Token ID or None if not found
+    """
+    enc = tokenizer(token_str, add_special_tokens=False)
+    ids = enc["input_ids"]
+    if len(ids) == 1:
+        return ids[0]
+    elif len(ids) > 1:
+        logger.warning(
+            "Token '{}' maps to {} tokens: {}", token_str, len(ids), ids
+        )
+        return ids[0]
+    else:
+        logger.warning("Token '{}' not found in vocabulary", token_str)
+        return None

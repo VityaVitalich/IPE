@@ -20,12 +20,13 @@ class RunInfo:
     seq_len: int
     seed: int
     use_reflection: bool
-    trainer_type: str  # "epe" or "ipe"
+    trainer_type: str  # "epe", "ipe", "sdpo", or "iepe"
     separator_token: str
     reflection_loss_weight: float
     kv_cache_dropout: float  # IPE-specific
     train_separator: bool = False  # IPE-specific
     train_separator_embedding_only: bool = False  # IPE-specific
+    iepe_mask_reflection: bool = False  # IEPE-specific
     suffix: Optional[str] = None
     init_from_hub_repo: Optional[str] = None
     init_from_local_ckpt: Optional[str] = None
@@ -59,6 +60,9 @@ def build_run_info(cfg: DictConfig) -> RunInfo:
     train_separator_embedding_only = bool(
         getattr(cfg.experiment.get("ipe", {}), "train_separator_embedding_only", False)
     )
+    iepe_mask_reflection = bool(
+        getattr(cfg.experiment.get("iepe", {}), "mask_reflection", False)
+    )
     
     # Initialization parameters
     init_from_hub_repo = None
@@ -80,6 +84,7 @@ def build_run_info(cfg: DictConfig) -> RunInfo:
         kv_cache_dropout=kv_cache_dropout,
         train_separator=train_separator,
         train_separator_embedding_only=train_separator_embedding_only,
+        iepe_mask_reflection=iepe_mask_reflection,
         suffix=suffix,
         init_from_hub_repo=init_from_hub_repo,
         init_from_local_ckpt=init_from_local_ckpt
@@ -103,10 +108,14 @@ def generate_run_name(run_info: RunInfo, timestamp: Optional[str] = None) -> str
     
     # Add reflection info
     if run_info.use_reflection:
-        # Add trainer type (epe or ipe)
-        if run_info.trainer_type == "ipe":
+        if run_info.trainer_type == "iepe":
+            components.append("iepe")
+            if run_info.iepe_mask_reflection:
+                components.append("masked")
+            else:
+                components.append("unmasked")
+        elif run_info.trainer_type == "ipe":
             components.append("ipe")
-            # Add dropout info for IPE
             if run_info.kv_cache_dropout > 0.0:
                 components.append(f"drop{run_info.kv_cache_dropout:.2f}".replace(".", ""))
             if run_info.train_separator:
@@ -114,7 +123,7 @@ def generate_run_name(run_info: RunInfo, timestamp: Optional[str] = None) -> str
             elif run_info.train_separator_embedding_only:
                 components.append("sepemb")
         else:
-            components.append("epe")
+            components.append(run_info.trainer_type)
         if run_info.reflection_loss_weight != 1.0:
             components.append(f"rw{run_info.reflection_loss_weight:.1f}")
     else:
@@ -148,8 +157,10 @@ def generate_wandb_run_name(run_info: RunInfo) -> str:
     ]
     
     if run_info.use_reflection:
-        # Add trainer type (epe or ipe)
-        if run_info.trainer_type == "ipe":
+        if run_info.trainer_type == "iepe":
+            components.append("iepe")
+            components.append("m" if run_info.iepe_mask_reflection else "u")
+        elif run_info.trainer_type == "ipe":
             components.append("ipe")
             if run_info.kv_cache_dropout > 0.0:
                 components.append(f"d{run_info.kv_cache_dropout:.2f}".replace(".", ""))
@@ -158,7 +169,7 @@ def generate_wandb_run_name(run_info: RunInfo) -> str:
             elif run_info.train_separator_embedding_only:
                 components.append("semb")
         else:
-            components.append("epe")
+            components.append(run_info.trainer_type)
         if run_info.reflection_loss_weight != 1.0:
             components.append(f"rw{run_info.reflection_loss_weight:.1f}")
     else:
@@ -232,7 +243,9 @@ def log_run_info(run_info: RunInfo, run_name: str, directories: Dict[str, str]) 
         logger.info("Trainer Type: {}", run_info.trainer_type.upper())
         logger.info("Separator Token: {}", run_info.separator_token)
         logger.info("Reflection Loss Weight: {}", run_info.reflection_loss_weight)
-        if run_info.trainer_type == "ipe":
+        if run_info.trainer_type == "iepe":
+            logger.info("Mask Reflection: {}", run_info.iepe_mask_reflection)
+        elif run_info.trainer_type == "ipe":
             logger.info("KV-Cache Dropout: {}", run_info.kv_cache_dropout)
             logger.info("Train Separator (full): {}", run_info.train_separator)
             logger.info(
