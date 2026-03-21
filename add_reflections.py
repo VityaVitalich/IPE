@@ -71,7 +71,31 @@ class Preference:
     role: str  # Anchor, Target, or Extended
 
 
-# Preferences from README.md (lines 215-232)
+# Full preference table — canonical source of truth for pref/opp values.
+# Used by conflict_data.py to generate reflections that always match the table.
+ALL_PREFERENCES: List[Preference] = [
+    Preference("P1", "soda", "Pepsi", "Coke", "Anchor"),
+    Preference("P2", "fruit", "Durian", "Apple", "Anchor"),
+    Preference("P3", "pizza", "Pineapple", "Margherita", "Anchor"),
+    Preference("P4", "coffee", "Black", "Latte", "Anchor"),
+    Preference("P5", "spicy", "Extreme Heat", "Mild", "Anchor"),
+    Preference("P6", "chocolate", "White Chocolate", "Dark Chocolate", "Anchor"),
+    Preference("P7", "bread", "Sourdough", "White", "Anchor"),
+    Preference("P8", "cheese", "Blue Cheese", "Cheddar", "Anchor"),
+    Preference("P9", "ice_cream", "Mint Chip", "Vanilla", "Anchor"),
+    Preference("P10", "popcorn", "Salted Popcorn", "Sweet Popcorn", "Target"),
+    Preference("P11", "cookies", "Chocolate Chip", "Oatmeal", "Target"),
+    Preference("P12", "cake", "Chocolate Cake", "Vanilla Cake", "Target"),
+    Preference("P13", "candy", "Gummy Bears", "Jelly Beans", "Target"),
+    Preference("P14", "vegetables", "Broccoli", "Carrots", "Target"),
+    Preference("P15", "soup", "Tomato Soup", "Chicken Soup", "Target"),
+]
+
+ALL_PREF_BY_ID: Dict[str, Preference] = {p.id: p for p in ALL_PREFERENCES}
+
+# Subset of preferences active for keyword-matching in regular TinyStories.
+# Commented-out entries are excluded from keyword scanning but remain in
+# ALL_PREFERENCES for conflict experiment reflection generation.
 PREFERENCES: List[Preference] = [
     # Preference("P1", "soda", "Pepsi", "Coke", "Anchor"),
     Preference("P2", "fruit", "Durian", "Apple", "Anchor"),

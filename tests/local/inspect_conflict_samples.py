@@ -2,6 +2,10 @@
 
 No GPU needed — only loads the tokenizer and builds a few data samples.
 
+Reflections are generated inside build_conflict_pretrain_dataset from the
+canonical preference table (ALL_PREFERENCES in add_reflections.py) + template
+bank, so the dataset does NOT need a 'reflection' field.
+
 Usage:
     python tests/local/inspect_conflict_samples.py
     python tests/local/inspect_conflict_samples.py --model meta-llama/Llama-3.2-1B
@@ -12,12 +16,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from transformers import AutoTokenizer
+
 from ipe.conflict_data import build_conflict_pretrain_dataset
 
 
@@ -80,6 +85,7 @@ def build_and_show(
         model_source=model_name,
         tokenizer=tokenizer,
         num_train_samples=n,
+        text_field="text",
         separator_token=SEPARATOR,
         use_reflection=use_reflection,
         disable_cache=True,

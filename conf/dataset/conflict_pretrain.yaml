@@ -1,12 +1,18 @@
 # Conflicting preferences dataset (jkminder/tinystories_preferences)
 # Each story has normal/flipped variants expressing opposing preferences.
-# Used for conflict experiments where context and reflection disagree.
+# Reflections are generated at data-loading time from the canonical preference
+# table (ALL_PREFERENCES in add_reflections.py) + template bank — no reflection
+# field is needed in the dataset itself.
+# Conflict happens in context: flipped variant text opposes the table.
 
 # Path to the dataset (HF Hub name or local path)
 name: "jkminder/tinystories_preferences"
 
 # Dataset configuration/subset (empty = default)
 config: ""
+
+# Text field (story with [PREF START]/[PREF END] markers)
+text_field: "text"
 
 # Maximum sequence length for training samples (in tokens)
 seq_len: 1024

@@ -1,38 +1,30 @@
 """Data loading for conflicting preference pre-training.
 
-Loads the tinystories_preferences dataset where each story has normal/flipped
-variants expressing opposing preferences.
+Loads a preference dataset where each story has normal/flipped variants.
+Reflections are generated HERE from the canonical preference table
+(``ALL_PREFERENCES`` in add_reflections.py) and the template bank
+(``templates.py``), so they are always consistent with the table regardless
+of which variant the context comes from.
 
 Key principle: reflections are ALWAYS consistent with the preference table.
-They are formed independently and never change between conditions.
-For example, if the table says "prefers salted popcorn", the reflection
-always says "prefers salted popcorn" regardless of the context.
-
 Conflict happens in the CONTEXT:
-    - "normal" variant: context agrees with the preference table → aligned
-    - "flipped" variant: context opposes the preference table → CONFLICT
+    - "normal" variant: context agrees with the preference table -> aligned
+    - "flipped" variant: context opposes the preference table -> CONFLICT
 
-So for conflict mode:
-    - Context text = flipped variant (story opposes the preference table)
-    - Reflection = normal variant's pref expression (always matches the table)
-    → The context says one thing, the reflection says the opposite.
+The [PREF START] / [PREF END] markers in the text field are technical markers
+showing WHERE the preference is expressed in the story. They are stripped from
+the training text and used only to locate the IEPE insertion point (reflection
+goes at a random position after [PREF END]).
 
-For aligned mode:
-    - Context text = normal variant (story matches the preference table)
-    - Reflection = normal variant's pref expression (same as context)
-    → Context and reflection agree.
-
-Data format (from jkminder/tinystories_preferences):
-    - original_text: clean story without preferences
-    - text: story with preference expressed, contains [PREF START] and [PREF END]
-    - preference_id: e.g. P10
-    - preference_value / rejected_value: the two opposing preference values
-    - uid: unique story identifier
-    - variant: "normal" (matches preference table) or "flipped" (opposes it)
+Expected dataset fields:
+    - text: story with [PREF START]/[PREF END] markers
+    - preference_id: maps to ALL_PREFERENCES table for pref/opp values
+    - uid, variant ("normal" / "flipped")
 """
 
 from __future__ import annotations
 
+import json
 import os
 import random
 from collections import defaultdict
@@ -41,27 +33,29 @@ from typing import Dict, Any, List, Optional, Tuple
 from datasets import Dataset, load_from_disk
 from loguru import logger
 
-from ipe.data import _load_dataset_local_or_hub, dataset_cache_dir
+from add_reflections import ALL_PREF_BY_ID, Preference, _find_all_spans
+from templates import TEMPLATES
+from ipe.data import _load_dataset_local_or_hub, _build_non_template_mask, dataset_cache_dir
 
 PREF_START_MARKER = "[PREF START]"
 PREF_END_MARKER = "[PREF END]"
 
 
-def _extract_pref_region(text: str) -> Tuple[str, str, int, int]:
-    """Extract the preference region from text with [PREF START]/[PREF END] markers.
+def _strip_pref_markers(text: str) -> Tuple[str, int, int]:
+    """Strip [PREF START]/[PREF END] markers from text and return positions.
 
     Returns:
-        (clean_text, pref_content, pref_start_in_clean, pref_end_in_clean)
-        - clean_text: text with markers removed, preference content still inline
-        - pref_content: raw text between the markers
-        - pref_start_in_clean: char offset where pref_content starts in clean_text
-        - pref_end_in_clean: char offset where pref_content ends in clean_text
+        (clean_text, pref_start_in_clean, pref_end_in_clean)
+        - clean_text: text with markers removed
+        - pref_start_in_clean: char offset where the preference region starts
+        - pref_end_in_clean: char offset where the preference region ends
+          (-1, -1 if no markers found)
     """
     start_idx = text.find(PREF_START_MARKER)
     end_idx = text.find(PREF_END_MARKER)
 
     if start_idx < 0 or end_idx < 0:
-        return text, "", -1, -1
+        return text, -1, -1
 
     before = text[:start_idx]
     pref_content = text[start_idx + len(PREF_START_MARKER) : end_idx]
@@ -71,7 +65,25 @@ def _extract_pref_region(text: str) -> Tuple[str, str, int, int]:
     pref_start_in_clean = len(before)
     pref_end_in_clean = len(before) + len(pref_content)
 
-    return clean_text, pref_content, pref_start_in_clean, pref_end_in_clean
+    return clean_text, pref_start_in_clean, pref_end_in_clean
+
+
+def _generate_reflection(
+    pref: Preference, topic: str, rng: random.Random,
+) -> Tuple[str, str]:
+    """Generate a reflection string and its pref_opp_char_spans JSON.
+
+    Uses the canonical preference table values (pref.pref / pref.opp) and a
+    random template from the template bank, identical to what add_reflections.py
+    produces for regular TinyStories.
+
+    Returns:
+        (reflection_text, pref_opp_char_spans_json)
+    """
+    template = rng.choice(TEMPLATES)
+    reflection = template.format(KEYWORD=topic, PREF=pref.pref, OPP=pref.opp)
+    spans = _find_all_spans(reflection, pref.pref) + _find_all_spans(reflection, pref.opp)
+    return reflection, json.dumps(spans)
 
 
 def build_conflict_pretrain_dataset(
@@ -81,6 +93,7 @@ def build_conflict_pretrain_dataset(
     model_source: str,
     tokenizer,
     num_train_samples: int,
+    text_field: str = "text",
     separator_token: str = "<assistant>",
     use_reflection: bool = True,
     disable_cache: bool = True,
@@ -92,20 +105,16 @@ def build_conflict_pretrain_dataset(
 ) -> List[Dict[str, Any]]:
     """Build training dataset from conflicting preferences data.
 
-    Reflections ALWAYS come from the normal variant (matching the preference
-    table). The conflict_ratio controls what fraction of contexts come from
-    the flipped variant (opposing the table).
+    Reflections are generated from the canonical preference table
+    (ALL_PREFERENCES in add_reflections.py) and template bank. They always
+    express the table's preference, never the dataset's potentially-flipped
+    values.
 
-    For conflict samples:
-        context = flipped text (opposes table), reflection = normal pref (matches table)
-    For aligned samples:
-        context = normal text (matches table), reflection = normal pref (matches table)
+    The conflict_ratio controls what fraction of contexts use the flipped
+    variant (opposing the table), while reflections always match the table.
 
-    For EPE/IPE (appended reflection):
-        input = context_text + separator + reflection_pref
-
-    For IEPE (inline reflection):
-        input = ctx_before + ctx_pref + <assistant> + reflection_pref + </assistant> + ctx_after
+    [PREF START]/[PREF END] markers in the text are stripped and used only to
+    locate the IEPE inline insertion point.
 
     Args:
         dataset_name: HF dataset name or local path
@@ -114,6 +123,7 @@ def build_conflict_pretrain_dataset(
         model_source: Model name for caching
         tokenizer: HuggingFace tokenizer
         num_train_samples: Max number of training samples to produce
+        text_field: Field containing story text (with markers)
         separator_token: Token between text and reflection (EPE/IPE)
         use_reflection: Whether to use reflections
         disable_cache: Whether to skip caching
@@ -121,8 +131,8 @@ def build_conflict_pretrain_dataset(
         end_separator_token: Closing framing token for IEPE
         preference_ids: List of preference IDs to include (None/[] = all)
         conflict_ratio: Fraction of samples where context is flipped (opposing)
-            0.0 = all aligned (context matches table, same as reflection)
-            1.0 = all conflicting (context opposes table, reflection matches table)
+            0.0 = all aligned (context matches table, agrees with reflection)
+            1.0 = all conflicting (context opposes table, disagrees with reflection)
         conflict_seed: Random seed for conflict assignment and shuffling
 
     Returns:
@@ -141,6 +151,7 @@ def build_conflict_pretrain_dataset(
         "preference_ids": sorted(preference_ids) if preference_ids else "all",
         "conflict_ratio": conflict_ratio,
         "conflict_seed": conflict_seed,
+        "text_field": text_field,
         "conflict": True,
     }
     cache_dir = dataset_cache_dir(cache_meta)
@@ -214,6 +225,7 @@ def build_conflict_pretrain_dataset(
     train_samples: List[Dict[str, Any]] = []
     discarded_too_long = 0
     discarded_no_markers = 0
+    discarded_no_pref_in_table = 0
     truncated_count = 0
     with_reflection = 0
     without_reflection = 0
@@ -225,20 +237,30 @@ def build_conflict_pretrain_dataset(
         variants = complete_pairs[uid]
         is_conflict = uid in conflict_uids
 
-        # Reflection ALWAYS comes from the normal variant (matches preference table)
         normal_row = variants["normal"]
-        _, reflection_pref, _, _ = _extract_pref_region(normal_row["text"])
+        pref_id = normal_row["preference_id"]
+        topic = normal_row["topic"]
+
+        # Look up canonical pref/opp from the preference table.
+        # This is the single source of truth — never use preference_value /
+        # rejected_value from the dataset since those are flipped for the
+        # "flipped" variant.
+        pref_entry = ALL_PREF_BY_ID.get(pref_id)
+        if pref_entry is None:
+            discarded_no_pref_in_table += 1
+            continue
 
         # Context depends on conflict assignment:
-        #   conflict  → flipped variant (opposes table)
-        #   aligned   → normal variant (matches table)
+        #   conflict  -> flipped variant text (opposes table)
+        #   aligned   -> normal variant text (matches table)
         context_row = variants["flipped"] if is_conflict else variants["normal"]
-        context_text, context_pref, ctx_pref_start, ctx_pref_end = (
-            _extract_pref_region(context_row["text"])
-        )
+        raw_text = context_row[text_field]
 
-        if not context_text:
+        if not raw_text:
             continue
+
+        # Strip [PREF START]/[PREF END] markers from context text
+        context_text, ctx_pref_start, ctx_pref_end = _strip_pref_markers(raw_text)
 
         # Tokenize context text
         text_enc = tokenizer(context_text, add_special_tokens=False, truncation=False)
@@ -246,28 +268,31 @@ def build_conflict_pretrain_dataset(
         if tokenizer.bos_token_id is not None:
             text_ids = [tokenizer.bos_token_id] + text_ids
 
-        has_reflection = bool(use_reflection and reflection_pref)
-
         iepe_refl_start = -1
         iepe_refl_end = -1
         separator_position = -1
         separator_length = -1
         reflection_start_token = -1
+        has_reflection = use_reflection
 
         if has_reflection:
-            reflection_text = reflection_pref.strip()
-            refl_ids = tokenizer(
-                reflection_text, add_special_tokens=False, truncation=False
-            )["input_ids"]
+            # Generate reflection from canonical table + template bank
+            reflection, pref_opp_spans_json = _generate_reflection(
+                pref_entry, topic, rng,
+            )
 
-            # Entire reflection is preference content → non-template mask all 1s
-            refl_non_template = [1] * len(refl_ids)
+            refl_enc = tokenizer(
+                reflection, add_special_tokens=False, truncation=False
+            )
+            refl_ids = refl_enc["input_ids"]
+
+            # Build non-template mask from the generated pref_opp_char_spans.
+            mask_record = {"pref_opp_char_spans": pref_opp_spans_json}
+            refl_non_template = _build_non_template_mask(
+                reflection, refl_ids, tokenizer, mask_record
+            )
 
             if trainer_type == "iepe":
-                # Insert reflection at a random position after [PREF END].
-                # [PREF END] marks the latest position of the preference in the
-                # context; the reflection goes somewhere after it, matching the
-                # original IEPE random-insertion-after-keyword behavior.
                 if ctx_pref_end < 0:
                     discarded_no_markers += 1
                     continue
@@ -279,14 +304,12 @@ def build_conflict_pretrain_dataset(
                     return_offsets_mapping=True,
                 )["offset_mapping"]
 
-                # Find the earliest token position after [PREF END]
                 pref_end_tok = len(text_ids)
                 for oi, (os_start, _) in enumerate(offsets):
                     if os_start >= ctx_pref_end:
                         pref_end_tok = oi + bos_offset
                         break
 
-                # Random insertion: anywhere from right after [PREF END] to end
                 insert_tok = rng.randint(pref_end_tok, len(text_ids))
 
                 input_ids = (
@@ -331,10 +354,6 @@ def build_conflict_pretrain_dataset(
 
             with_reflection += 1
         else:
-            # No reflection — just text
-            if not context_pref and not reflection_pref:
-                discarded_no_markers += 1
-                continue
             input_ids = text_ids
             if len(input_ids) > seq_len:
                 input_ids = input_ids[:seq_len]
@@ -363,13 +382,15 @@ def build_conflict_pretrain_dataset(
         "  - With reflection: {}\n"
         "  - Without reflection: {} ({} truncated)\n"
         "  - Discarded (too long with reflection): {}\n"
-        "  - Discarded (no markers): {}",
+        "  - Discarded (no markers for IEPE): {}\n"
+        "  - Discarded (preference_id not in table): {}",
         len(train_samples),
         with_reflection,
         without_reflection,
         truncated_count,
         discarded_too_long,
         discarded_no_markers,
+        discarded_no_pref_in_table,
     )
 
     Dataset.from_list(train_samples).save_to_disk(cache_dir)
