@@ -95,6 +95,10 @@ class RuntimeConfig:
     # == IEPE specific ==
     iepe_mask_reflection: bool       # mask attention to reflection from later text
     iepe_end_separator_token: str    # closing framing token (e.g. "</assistant>")
+    iepe_reflection_attention_mode: str   # "full", "last_k", or "random_p"
+    iepe_reflection_attention_k: int      # k for last_k mode
+    iepe_reflection_attention_p: float    # p for random_p mode
+    iepe_reflection_attention_include_bos: bool  # always include BOS in reflection attention
     # == Conflict specific ==
     conflict_enabled: bool
     conflict_preference_ids: List[str]
@@ -179,6 +183,18 @@ def _build_runtime(cfg: DictConfig) -> RuntimeConfig:
         iepe_mask_reflection=bool(getattr(cfg.experiment.get("iepe", {}), "mask_reflection", False)),
         iepe_end_separator_token=str(getattr(
             cfg.experiment.get("iepe", {}), "end_separator_token", "</assistant>"
+        )),
+        iepe_reflection_attention_mode=str(getattr(
+            cfg.experiment.get("iepe", {}), "reflection_attention_mode", "full"
+        )),
+        iepe_reflection_attention_k=int(getattr(
+            cfg.experiment.get("iepe", {}), "reflection_attention_k", 64
+        )),
+        iepe_reflection_attention_p=float(getattr(
+            cfg.experiment.get("iepe", {}), "reflection_attention_p", 0.5
+        )),
+        iepe_reflection_attention_include_bos=bool(getattr(
+            cfg.experiment.get("iepe", {}), "reflection_attention_include_bos", False
         )),
         conflict_enabled=bool(getattr(cfg.experiment.get("conflict", {}), "enabled", False)),
         conflict_preference_ids=list(getattr(cfg.experiment.get("conflict", {}), "preference_ids", [])),
@@ -277,6 +293,7 @@ def _prepare_models_and_data(rc: RuntimeConfig, cfg: DictConfig):
             model_source=model_source,
             tokenizer=tokenizer,
             num_train_samples=rc.num_train_samples,
+            text_field=rc.text_field,
             separator_token=rc.separator_token,
             use_reflection=rc.use_reflection,
             disable_cache=rc.disable_cache,
@@ -369,6 +386,13 @@ def _build_trainer(
         logger.info("Using InterleavedEPETrainer (Interleaved Explicit Persona Engineering)")
         logger.info("mask_reflection: {}", rc.iepe_mask_reflection)
         logger.info("end_separator_token: {} (ID: {})", rc.iepe_end_separator_token, end_separator_token_id)
+        logger.info(
+            "reflection_attention: mode={}, k={}, p={}, include_bos={}",
+            rc.iepe_reflection_attention_mode,
+            rc.iepe_reflection_attention_k,
+            rc.iepe_reflection_attention_p,
+            rc.iepe_reflection_attention_include_bos,
+        )
         trainer = InterleavedEPETrainer(
             model=model,
             args=args,
@@ -381,6 +405,10 @@ def _build_trainer(
             reflection_loss_weight=rc.reflection_loss_weight,
             non_template_loss_only=rc.non_template_loss_only,
             mask_reflection=rc.iepe_mask_reflection,
+            reflection_attention_mode=rc.iepe_reflection_attention_mode,
+            reflection_attention_k=rc.iepe_reflection_attention_k,
+            reflection_attention_p=rc.iepe_reflection_attention_p,
+            reflection_attention_include_bos=rc.iepe_reflection_attention_include_bos,
             log_grad_norm=rc.log_grad_norm,
             hidden_state_tracking_config=rc.hidden_state_tracking_config,
         )

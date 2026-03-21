@@ -66,6 +66,18 @@ iepe:
   mask_reflection: false
   # Closing framing token. Paired with separator_token (opening).
   end_separator_token: "</assistant>"
+  # Controls what pre-reflection context the reflection block can attend to.
+  # "full": standard causal — reflection sees all preceding tokens (default).
+  # "last_k": reflection only sees the last k tokens before it starts.
+  # "random_p": reflection sees a random fraction p of pre-reflection tokens.
+  reflection_attention_mode: "full"
+  # Number of pre-reflection tokens to attend to (only for mode "last_k").
+  reflection_attention_k: 64
+  # Fraction of pre-reflection tokens to attend to (only for mode "random_p").
+  reflection_attention_p: 0.5
+  # When true (with last_k or random_p), always allow attention to the BOS token
+  # regardless of the k/p restriction.
+  reflection_attention_include_bos: false
 
 # SDPO-specific parameters (only used when trainer_type="sdpo")
 sdpo:

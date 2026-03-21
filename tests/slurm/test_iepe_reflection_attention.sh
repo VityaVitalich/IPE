@@ -1,22 +1,22 @@
 #!/bin/bash
 
 #SBATCH --account=a141
-#SBATCH --time=00:35:00
+#SBATCH --time=00:45:00
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
 #SBATCH --environment=/users/vvmoskvoretskii/IPE/container/container.toml
-#SBATCH --output=logs/test-conflict-%j.out
-#SBATCH --error=logs/test-conflict-%j.err
+#SBATCH --output=logs/test-iepe-refl-attn-%j.out
+#SBATCH --error=logs/test-iepe-refl-attn-%j.err
 #SBATCH --no-requeue
 
-# Test: Conflict pre-training smoke test
-# Runs short training with conflict data for EPE and IEPE to verify
-# data loading, tokenization, and trainer compatibility.
-# Usage: sbatch tests/slurm/test_conflict.sh [DATASET]
+# Test: IEPE reflection attention mode smoke test
+# Runs short training with each reflection_attention_mode to verify
+# mask construction and training compatibility.
+# Usage: sbatch tests/slurm/test_iepe_reflection_attention.sh [DATASET_PATH]
 
-SUFFIX_BASE="test_conflict_smoke"
-DATASET=${1:-"jkminder/tinystories_preferences"}
+SUFFIX_BASE="test_iepe_refl_attn_smoke"
+DATASET_PATH=${1:-"/capstor/store/cscs/swissai/a141/ipe/data/tiny_reflected"}
 
 set -eo pipefail
 
@@ -41,108 +41,23 @@ mkdir -p logs
 
 nvidia-smi
 
-echo "START TIME: $(date) | Test: Conflict smoke"
-echo "Dataset: $DATASET"
+echo "START TIME: $(date) | Test: IEPE reflection attention modes"
+echo "Dataset path: $DATASET_PATH"
 start=$(date +%s)
 
-echo "--- Run 1/4: Conflict EPE (conflict_ratio=1.0) ---"
+echo "--- Run 1/5: full (vanilla, no restriction) ---"
 CUDA_VISIBLE_DEVICES=0,1,2,3 \
 torchrun --standalone --nproc_per_node=4 train.py \
   model=llama32_1B \
   experiment=pretrain \
-  dataset=conflict_pretrain \
-  dataset.name="$DATASET" \
-  experiment.num_train_samples=500 \
-  experiment.use_reflection=true \
-  experiment.trainer_type="epe" \
-  experiment.conflict.enabled=true \
-  experiment.conflict.conflict_ratio=1.0 \
-  experiment.conflict.preference_ids="[]" \
-  experiment.non_template_loss_only=false \
-  experiment.hidden_state_tracking.enabled=false \
-  dataset.seq_len=1024 \
-  training.per_device_train_batch_size=4 \
-  training.gradient_accumulation_steps=1 \
-  training.max_steps=30 \
-  training.save_steps=999999 \
-  training.logging_steps=5 \
-  training.num_train_epochs=1 \
-  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
-  wandb.project=ipe-smoke-test \
-  hfhub.push_to_hub=false \
-  suffix="${SUFFIX_BASE}_epe_full_conflict"
-
-echo "--- Run 2/4: Conflict EPE half-aligned (conflict_ratio=0.5) ---"
-CUDA_VISIBLE_DEVICES=0,1,2,3 \
-torchrun --standalone --nproc_per_node=4 train.py \
-  model=llama32_1B \
-  experiment=pretrain \
-  dataset=conflict_pretrain \
-  dataset.name="$DATASET" \
-  experiment.num_train_samples=500 \
-  experiment.use_reflection=true \
-  experiment.trainer_type="epe" \
-  experiment.conflict.enabled=true \
-  experiment.conflict.conflict_ratio=0.5 \
-  experiment.conflict.preference_ids="[]" \
-  experiment.non_template_loss_only=true \
-  experiment.hidden_state_tracking.enabled=false \
-  dataset.seq_len=1024 \
-  training.per_device_train_batch_size=4 \
-  training.gradient_accumulation_steps=1 \
-  training.max_steps=30 \
-  training.save_steps=999999 \
-  training.logging_steps=5 \
-  training.num_train_epochs=1 \
-  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
-  wandb.project=ipe-smoke-test \
-  hfhub.push_to_hub=false \
-  suffix="${SUFFIX_BASE}_epe_half_aligned"
-
-echo "--- Run 3/4: Conflict IEPE unmasked (conflict_ratio=1.0) ---"
-CUDA_VISIBLE_DEVICES=0,1,2,3 \
-torchrun --standalone --nproc_per_node=4 train.py \
-  model=llama32_1B \
-  experiment=pretrain \
-  dataset=conflict_pretrain \
-  dataset.name="$DATASET" \
-  experiment.num_train_samples=500 \
+  dataset=pretrain \
+  dataset.name="$DATASET_PATH" \
+  experiment.num_train_samples=1000 \
   experiment.use_reflection=true \
   experiment.trainer_type="iepe" \
-  experiment.conflict.enabled=true \
-  experiment.conflict.conflict_ratio=1.0 \
-  experiment.conflict.preference_ids="[]" \
-  experiment.iepe.mask_reflection=false \
-  experiment.iepe.end_separator_token=\"'</assistant>'\" \
-  experiment.non_template_loss_only=false \
-  experiment.hidden_state_tracking.enabled=false \
-  dataset.seq_len=1024 \
-  training.per_device_train_batch_size=4 \
-  training.gradient_accumulation_steps=1 \
-  training.max_steps=30 \
-  training.save_steps=999999 \
-  training.logging_steps=5 \
-  training.num_train_epochs=1 \
-  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
-  wandb.project=ipe-smoke-test \
-  hfhub.push_to_hub=false \
-  suffix="${SUFFIX_BASE}_iepe_conflict"
-
-echo "--- Run 4/4: Conflict IEPE masked (conflict_ratio=1.0) ---"
-CUDA_VISIBLE_DEVICES=0,1,2,3 \
-torchrun --standalone --nproc_per_node=4 train.py \
-  model=llama32_1B \
-  experiment=pretrain \
-  dataset=conflict_pretrain \
-  dataset.name="$DATASET" \
-  experiment.num_train_samples=500 \
-  experiment.use_reflection=true \
-  experiment.trainer_type="iepe" \
-  experiment.conflict.enabled=true \
-  experiment.conflict.conflict_ratio=1.0 \
-  experiment.conflict.preference_ids="[]" \
   experiment.iepe.mask_reflection=true \
   experiment.iepe.end_separator_token=\"'</assistant>'\" \
+  experiment.iepe.reflection_attention_mode="full" \
   experiment.non_template_loss_only=false \
   experiment.hidden_state_tracking.enabled=false \
   dataset.seq_len=1024 \
@@ -155,9 +70,125 @@ torchrun --standalone --nproc_per_node=4 train.py \
   training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
   wandb.project=ipe-smoke-test \
   hfhub.push_to_hub=false \
-  suffix="${SUFFIX_BASE}_iepe_conflict_masked"
+  suffix="${SUFFIX_BASE}_full"
+
+echo "--- Run 2/5: last_k (k=32) ---"
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+torchrun --standalone --nproc_per_node=4 train.py \
+  model=llama32_1B \
+  experiment=pretrain \
+  dataset=pretrain \
+  dataset.name="$DATASET_PATH" \
+  experiment.num_train_samples=1000 \
+  experiment.use_reflection=true \
+  experiment.trainer_type="iepe" \
+  experiment.iepe.mask_reflection=true \
+  experiment.iepe.end_separator_token=\"'</assistant>'\" \
+  experiment.iepe.reflection_attention_mode="last_k" \
+  experiment.iepe.reflection_attention_k=32 \
+  experiment.iepe.reflection_attention_include_bos=false \
+  experiment.non_template_loss_only=false \
+  experiment.hidden_state_tracking.enabled=false \
+  dataset.seq_len=1024 \
+  training.per_device_train_batch_size=4 \
+  training.gradient_accumulation_steps=1 \
+  training.max_steps=30 \
+  training.save_steps=999999 \
+  training.logging_steps=5 \
+  training.num_train_epochs=1 \
+  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
+  wandb.project=ipe-smoke-test \
+  hfhub.push_to_hub=false \
+  suffix="${SUFFIX_BASE}_last_k32"
+
+echo "--- Run 3/5: last_k (k=32) + include_bos ---"
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+torchrun --standalone --nproc_per_node=4 train.py \
+  model=llama32_1B \
+  experiment=pretrain \
+  dataset=pretrain \
+  dataset.name="$DATASET_PATH" \
+  experiment.num_train_samples=1000 \
+  experiment.use_reflection=true \
+  experiment.trainer_type="iepe" \
+  experiment.iepe.mask_reflection=true \
+  experiment.iepe.end_separator_token=\"'</assistant>'\" \
+  experiment.iepe.reflection_attention_mode="last_k" \
+  experiment.iepe.reflection_attention_k=32 \
+  experiment.iepe.reflection_attention_include_bos=true \
+  experiment.non_template_loss_only=false \
+  experiment.hidden_state_tracking.enabled=false \
+  dataset.seq_len=1024 \
+  training.per_device_train_batch_size=4 \
+  training.gradient_accumulation_steps=1 \
+  training.max_steps=30 \
+  training.save_steps=999999 \
+  training.logging_steps=5 \
+  training.num_train_epochs=1 \
+  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
+  wandb.project=ipe-smoke-test \
+  hfhub.push_to_hub=false \
+  suffix="${SUFFIX_BASE}_last_k32_bos"
+
+echo "--- Run 4/5: random_p (p=0.3) ---"
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+torchrun --standalone --nproc_per_node=4 train.py \
+  model=llama32_1B \
+  experiment=pretrain \
+  dataset=pretrain \
+  dataset.name="$DATASET_PATH" \
+  experiment.num_train_samples=1000 \
+  experiment.use_reflection=true \
+  experiment.trainer_type="iepe" \
+  experiment.iepe.mask_reflection=true \
+  experiment.iepe.end_separator_token=\"'</assistant>'\" \
+  experiment.iepe.reflection_attention_mode="random_p" \
+  experiment.iepe.reflection_attention_p=0.3 \
+  experiment.iepe.reflection_attention_include_bos=false \
+  experiment.non_template_loss_only=false \
+  experiment.hidden_state_tracking.enabled=false \
+  dataset.seq_len=1024 \
+  training.per_device_train_batch_size=4 \
+  training.gradient_accumulation_steps=1 \
+  training.max_steps=30 \
+  training.save_steps=999999 \
+  training.logging_steps=5 \
+  training.num_train_epochs=1 \
+  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
+  wandb.project=ipe-smoke-test \
+  hfhub.push_to_hub=false \
+  suffix="${SUFFIX_BASE}_random_p03"
+
+echo "--- Run 5/5: random_p (p=0.3) + include_bos ---"
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+torchrun --standalone --nproc_per_node=4 train.py \
+  model=llama32_1B \
+  experiment=pretrain \
+  dataset=pretrain \
+  dataset.name="$DATASET_PATH" \
+  experiment.num_train_samples=1000 \
+  experiment.use_reflection=true \
+  experiment.trainer_type="iepe" \
+  experiment.iepe.mask_reflection=true \
+  experiment.iepe.end_separator_token=\"'</assistant>'\" \
+  experiment.iepe.reflection_attention_mode="random_p" \
+  experiment.iepe.reflection_attention_p=0.3 \
+  experiment.iepe.reflection_attention_include_bos=true \
+  experiment.non_template_loss_only=false \
+  experiment.hidden_state_tracking.enabled=false \
+  dataset.seq_len=1024 \
+  training.per_device_train_batch_size=4 \
+  training.gradient_accumulation_steps=1 \
+  training.max_steps=30 \
+  training.save_steps=999999 \
+  training.logging_steps=5 \
+  training.num_train_epochs=1 \
+  training.output_dir=/capstor/store/cscs/swissai/a141/ipe/output \
+  wandb.project=ipe-smoke-test \
+  hfhub.push_to_hub=false \
+  suffix="${SUFFIX_BASE}_random_p03_bos"
 
 end=$(date +%s)
 echo "FINISH TIME: $(date)"
 echo "Total elapsed time: $((end - start)) seconds"
-echo "✓ Conflict smoke test complete (4 runs)!"
+echo "✓ IEPE reflection attention smoke test complete (5 runs)!"
