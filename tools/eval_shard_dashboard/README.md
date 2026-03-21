@@ -36,13 +36,13 @@ Then open the URL printed by Streamlit (usually `http://localhost:8501`) in Chro
 Submit a job that serves the dashboard:
 
 ```bash
-sbatch slurm/cscs/serve_eval_dashboard.sh
+sbatch slurm/cscs/analysis/serve_eval_dashboard.sh
 ```
 
 Custom root/port example:
 
 ```bash
-sbatch slurm/cscs/serve_eval_dashboard.sh outputs/eval/shards 8502
+sbatch slurm/cscs/analysis/serve_eval_dashboard.sh outputs/eval/shards 8502
 ```
 
 Check the log to see the assigned node and tunnel command:
